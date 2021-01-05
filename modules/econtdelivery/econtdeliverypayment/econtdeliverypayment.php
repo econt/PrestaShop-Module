@@ -118,19 +118,26 @@ class EcontDeliveryPayment extends PaymentModule {
         curl_close($curl);
 
         if (!empty($response['error'])) {
-            if (EcontDelivery::updateOrderStatus($order, $this->context->language->id)) $order->setCurrentState(Configuration::get('PS_OS_ERROR'));
+            if (EcontDelivery::updateOrderStatus($order, $this->context->language->id)) $this->setOrderCurrentState($order, Configuration::get('PS_OS_ERROR'));
             return $this->orderConfirmationMessage($response['message'], true);
         } elseif (empty($response['paymentToken'])) {
-            if (EcontDelivery::updateOrderStatus($order, $this->context->language->id)) $order->setCurrentState(Configuration::get('PS_OS_ERROR'));
+            if (EcontDelivery::updateOrderStatus($order, $this->context->language->id)) $this->setOrderCurrentState($order, Configuration::get('PS_OS_ERROR'));
             return $this->orderConfirmationMessage('Възникна проблем при приключване на плащане');
         }
 
         if (EcontDelivery::updateOrderStatus($order, $this->context->language->id)) $this->orderConfirmationMessage('Не е възможно да се промени статуса на плащането');
 
-        $order->setCurrentState(Configuration::get('PS_OS_PAYMENT'));
+        $this->setOrderCurrentState($order, Configuration::get('PS_OS_PAYMENT'));
         $econtDelivery = new EcontDelivery();
         $econtDelivery->syncOrder($order->id, $response['paymentToken']);
-        $order->setCurrentState(Configuration::get('PS_OS_PREPARATION'));
+        $this->setOrderCurrentState($order, Configuration::get('PS_OS_PREPARATION'));
+    }
+
+    public static function setOrderCurrentState($order, $state) {
+        $orderHistory = new OrderHistory();
+        $orderHistory->id_order = (int) $order->id;
+        $orderHistory->changeIdOrderState((int) $state, $order, true);
+        return $orderHistory->addWithemail();
     }
 
 }

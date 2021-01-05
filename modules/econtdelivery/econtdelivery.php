@@ -37,7 +37,6 @@ class EcontDelivery extends Module {
         'actionValidateOrder',
         'actionOrderStatusPostUpdate',
         'displayAdminOrderTabShip',
-        // new
         'displayAdminOrderMain'
     );
 
@@ -649,7 +648,7 @@ class EcontDelivery extends Module {
         /** @var Order $order */
         $order = $params['order'];
 
-        if($order->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return '';
+        if ($order->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return '';
 
         $deliveryBaseURL = Configuration::get('ECONT_DELIVERY_ENDPOINT');
         $deliverySecret = Configuration::get('ECONT_DELIVERY_SECRET');
@@ -708,6 +707,7 @@ class EcontDelivery extends Module {
             'customer_city_name' => $address->city,
             'customer_post_code' => $address->postcode,
             'customer_address' => $address->address1.' '.$address->address2,
+
             'ignore_history' => 1,
             'default_css' => 1
         );
@@ -719,9 +719,6 @@ class EcontDelivery extends Module {
         <script>
             document.addEventListener("DOMContentLoaded", function() {
                 $(document.body).delegate('a', 'click', function(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-
                     if (
                             this.href.indexOf('generateDeliverySlipPDF') > 0
                         ||  this.href.indexOf('generate-delivery-slip-pdf') > 0
@@ -733,6 +730,7 @@ class EcontDelivery extends Module {
                         } else {
                             $('<a href="<?=$prepareLoadingFrameURL?>">Generate Label</a>').appendTo(document.body).fancybox({width:700,height:'100%',type:'iframe',title:''}).trigger('click').remove()
                         }
+                        e.preventDefault();
                     }
                 });
 

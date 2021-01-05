@@ -55,7 +55,7 @@ class EcontDeliveryPaymentValidationModuleFrontController extends ModuleFrontCon
         if (!empty($response['error'])) {
             $this->redirectWithMessage($response['message'], true);
         } elseif (empty($response['paymentURI']) || empty($response['paymentIdentifier'])) {
-            if (EcontDelivery::updateOrderStatus($order, $this->context->language->id)) $order->setCurrentState(Configuration::get('PS_OS_ERROR'));
+            if (EcontDelivery::updateOrderStatus($order, $this->context->language->id)) EcontDeliveryPayment::setOrderCurrentState($order, Configuration::get('PS_OS_ERROR'));
             $this->redirectWithMessage('Възникна проблем при генериране на плащане');
         }
 
