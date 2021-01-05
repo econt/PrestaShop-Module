@@ -1,6 +1,8 @@
 *
 !*/
 !/.gitignore
+!/codecompletion/*
 !/modules/econtdelivery/*
+!/modules/econtdeliverypayment/*
 !/econt_delivery_create_archive.php
-!/econt_delivery.zip
+!/econtdelivery.zip
