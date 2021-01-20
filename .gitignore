@@ -3,5 +3,5 @@
 !/codecompletion/**
 !/modules/econtdelivery/**
 !/modules/econtdeliverypayment/**
-!/econt_delivery_create_archive.php
-!/econtdelivery.zip
+!/econt_delivery_zip_generator.php
+!/EcontDelivery-PrestaShop-Module.zip
