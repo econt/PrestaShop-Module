@@ -47,6 +47,7 @@ function createModuleZip($moduleName) {
     foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PRESTASHOP_MODULES_DIR . DIRECTORY_SEPARATOR . $moduleName, FilesystemIterator::SKIP_DOTS)) as $file) {
         $zip->addFile($file, DIRECTORY_SEPARATOR . str_replace(PRESTASHOP_MODULES_DIR, '', $file));
     }
+    $zip->setArchiveComment('Version: ' . MODULE_VERSION);
     $zip->close();
 
     return $moduleZipFile;
