@@ -165,6 +165,10 @@ class EcontDelivery extends Module {
 
             Configuration::updateValue('ECONT_DELIVERY_CARRIER_ID', $carrier->id);
             Configuration::updateValue('ECONT_DELIVERY_CARRIER_ID_REF', $carrier->id);
+
+            Configuration::updateValue('ECONT_DELIVERY_PAYMENT_TITLE', $this->l('Гарантирано от Еконт'));
+            Configuration::updateValue('ECONT_DELIVERY_PAYMENT_LOGO', 'dark');
+            Configuration::updateValue('ECONT_DELIVERY_PAYMENT_DESCRIPTION', $this->l('Плащане с карта, при което се резервира сумата за поръчката и доставката. Плащате, когато приемете пратката. При отказ, стойността на стоката автоматично се освобождава от картата. Приспада се само доставката. Пазарувате с карта без притеснения дали ще получите средствата си обратно при връщане.'));
         }
 
         try {
@@ -187,7 +191,7 @@ class EcontDelivery extends Module {
             $this->disablePaymentModule();
 
             $paymentModule = Module::getInstanceByName($this->econtDeliveryPaymentModule['name']);
-            if (!$paymentModule) throw new Exception($this->l('Проблем при създаване на инстанция за "Гарантирано с Еконт"'));
+            if (!$paymentModule) throw new Exception($this->l('Проблем при създаване на инстанция за "Гарантирано от Еконт"'));
             $paymentModule->uninstall();
             $this->recursiveRemoveDir(dirname(__DIR__) . DIRECTORY_SEPARATOR . $this->econtDeliveryPaymentModule['name']);
         } catch (Exception $exception) {
@@ -234,6 +238,11 @@ class EcontDelivery extends Module {
                 // payment module
                 (Tools::getValue('ECONT_DELIVERY_PAYMENT') ? $this->enablePaymentModule() : $this->disablePaymentModule());
 
+                // payment
+                Configuration::updateValue('ECONT_DELIVERY_PAYMENT_TITLE', Tools::getValue('ECONT_DELIVERY_PAYMENT_TITLE'));
+                Configuration::updateValue('ECONT_DELIVERY_PAYMENT_LOGO', Tools::getValue('ECONT_DELIVERY_PAYMENT_LOGO'));
+                Configuration::updateValue('ECONT_DELIVERY_PAYMENT_DESCRIPTION', Tools::getValue('ECONT_DELIVERY_PAYMENT_DESCRIPTION'));
+
                 $output .= $this->displayConfirmation($this->trans('Settings updated.', array(), 'Admin.Notifications.Success'));
                 Tools::redirectAdmin($this->context->link->getAdminLink('AdminModules', true) . '&configure=' . $this->name . '&tab_module=' . $this->tab . '&module_name=' . $this->name);
             } catch (Exception $exception) {
@@ -267,7 +276,12 @@ class EcontDelivery extends Module {
                 'ECONT_DELIVERY_ENDPOINT' => $endPointName,
                 'ECONT_DELIVERY_SECRET' => $secret,
                 'ECONT_DELIVERY_SECRET_HIDDEN' => $secret,
-                'ECONT_DELIVERY_PAYMENT' => ((intval(Module::getModuleIdByName($this->econtDeliveryPaymentModule['name'])) <= 0 || !Module::isEnabled($this->econtDeliveryPaymentModule['name'])) ? 0 : 1)
+                'ECONT_DELIVERY_PAYMENT' => ((intval(Module::getModuleIdByName($this->econtDeliveryPaymentModule['name'])) <= 0 || !Module::isEnabled($this->econtDeliveryPaymentModule['name'])) ? 0 : 1),
+
+                // payment
+                'ECONT_DELIVERY_PAYMENT_TITLE' => Configuration::get('ECONT_DELIVERY_PAYMENT_TITLE'),
+                'ECONT_DELIVERY_PAYMENT_LOGO' => Configuration::get('ECONT_DELIVERY_PAYMENT_LOGO'),
+                'ECONT_DELIVERY_PAYMENT_DESCRIPTION' => Configuration::get('ECONT_DELIVERY_PAYMENT_DESCRIPTION')
             )
         );
 
@@ -276,11 +290,43 @@ class EcontDelivery extends Module {
             #configuration_form #ECONT_DELIVERY_SECRET {
                 width: 170px;
             }
+
+            #configuration_form #ECONT_DELIVERY_PAYMENT_TITLE,
+            #configuration_form #ECONT_DELIVERY_PAYMENT_LOGO,
+            #configuration_form #ECONT_DELIVERY_PAYMENT_DESCRIPTION {
+                width: 510px !important;
+            }
+            #configuration_form #ECONT_DELIVERY_PAYMENT_LOGO_IMAGE {
+                margin-top: 10px;
+                padding: 10px;
+                background-color: #dbd9d9;
+                border-radius: 3px;
+            }
         </style>
         <script>
-            document.addEventListener("DOMContentLoaded", function() {
+            document.addEventListener('DOMContentLoaded', function() {
                 $('#ECONT_DELIVERY_SECRET').val($('#ECONT_DELIVERY_SECRET_HIDDEN').val());
-            });
+
+                let logoImageBaseURL = '<?=$this->getPathUri() . '/view/img'?>';
+                function iconFieldChange() {
+                    if (!icon) {
+                        icon = document.createElement('img');
+                        icon.setAttribute('id', 'ECONT_DELIVERY_PAYMENT_LOGO_IMAGE')
+                        iconField.parentNode.insertBefore(icon, iconField.nextSibling);
+                    }
+
+                    let selectedIndexValue = iconField.options[iconField.selectedIndex].value;
+                    if (selectedIndexValue === '') icon.classList.add('hide');
+                    else {
+                        icon.setAttribute('src', logoImageBaseURL + '/econt_payment_logo_' + selectedIndexValue + '.png');
+                        icon.classList.remove('hide');
+                    }
+                }
+                let icon;
+                let iconField = document.querySelector('#ECONT_DELIVERY_PAYMENT_LOGO')
+                iconField.addEventListener('change', iconFieldChange);
+                iconFieldChange();
+            })
         </script>
         <?php $outputOther = ob_get_contents();
         ob_end_clean();
@@ -313,9 +359,11 @@ class EcontDelivery extends Module {
                             'type' => 'hidden',
                             'name' => 'ECONT_DELIVERY_SECRET_HIDDEN'
                         ),
+
+                        // payment
                         array(
                             'type' => 'switch',
-                            'label' => $this->l('Активиране на "Гарантирано с Еконт"'),
+                            'label' => $this->l('Гарантирано от Еконт'),
                             'name' => 'ECONT_DELIVERY_PAYMENT',
                             'required' => false,
                             'is_bool' => true,
@@ -329,7 +377,31 @@ class EcontDelivery extends Module {
                                     'label' => $this->l('Inactive')
                                 )
                             )
-                        )
+                        ),
+                        array(
+                            'type' => 'text',
+                            'name' => 'ECONT_DELIVERY_PAYMENT_TITLE',
+                            'label' => $this->l('Гарантирано от Еконт - Име'),
+                        ),
+                        array(
+                            'type' => 'select',
+                            'name' => 'ECONT_DELIVERY_PAYMENT_LOGO',
+                            'label' => $this->l('Гарантирано от Еконт - Лого'),
+                            'options' => array(
+                                'query' => array(
+                                    array('idq' => '', 'name' => '---'),
+                                    array('idq' => 'dark', 'name' => $this->l('Тъмно')),
+                                    array('idq' => 'light', 'name' => $this->l('Светло'))
+                                ),
+                                'id' => 'idq',
+                                'name' => 'name'
+                            )
+                        ),
+                        array(
+                            'type' => 'textarea',
+                            'name' => 'ECONT_DELIVERY_PAYMENT_DESCRIPTION',
+                            'label' => $this->l('Гарантирано от Еконт - Описание')
+                        ),
                     ),
                     'submit' => array(
                         'title' => $this->trans('Save', array(), 'Admin.Actions')
@@ -341,22 +413,22 @@ class EcontDelivery extends Module {
 
     private function enablePaymentModule() {
         $this->recursiveCopyDir(__DIR__ . DIRECTORY_SEPARATOR . $this->econtDeliveryPaymentModule['name'], dirname(__DIR__) . DIRECTORY_SEPARATOR . $this->econtDeliveryPaymentModule['name']);
-        if (!in_array($this->econtDeliveryPaymentModule['name'], Module::getModulesDirOnDisk())) throw new Exception($this->l('Модулът "Гарантирано с Еконт" не е намерен'));
+        if (!in_array($this->econtDeliveryPaymentModule['name'], Module::getModulesDirOnDisk())) throw new Exception($this->l('Модулът "Гарантирано от Еконт" не е намерен'));
 
         if (intval(Module::getModuleIdByName($this->econtDeliveryPaymentModule['name'])) <= 0) {
             $paymentModule = Module::getInstanceByName($this->econtDeliveryPaymentModule['name']);
-            if (!$paymentModule->install()) throw new Exception($this->l('Възникна грешка при инсталиране на модула "Гарантирано с Еконт"'));
+            if (!$paymentModule->install()) throw new Exception($this->l('Възникна грешка при инсталиране на модула "Гарантирано от Еконт"'));
         }
 
         $paymentModule = Module::getInstanceByName($this->econtDeliveryPaymentModule['name']);
-        if (!$paymentModule) throw new Exception($this->l('Проблем при създаване на инстанция за "Гарантирано с Еконт"'));
+        if (!$paymentModule) throw new Exception($this->l('Проблем при създаване на инстанция за "Гарантирано от Еконт"'));
         $paymentModule->enable(true);
 
         return true;
     }
     private function disablePaymentModule() {
         $paymentModule = Module::getInstanceByName($this->econtDeliveryPaymentModule['name']);
-        if (!$paymentModule) throw new Exception($this->l('Проблем при създаване на инстанция за "Гарантирано с Еконт"'));
+        if (!$paymentModule) throw new Exception($this->l('Проблем при създаване на инстанция за "Гарантирано от Еконт"'));
         $paymentModule->disable(true);
 
         return true;

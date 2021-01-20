@@ -30,7 +30,7 @@ class EcontDeliveryPayment extends PaymentModule {
 
         parent::__construct();
 
-        $this->displayName = $this->l('Гарантирано с Еконт');
+        $this->displayName = $this->l('Гарантирано от Еконт');
         $this->description = $this->l('Допълнение към модула "Достави с Еконт".');
 
         $this->confirmUninstall = $this->l('Сигурни ли сте, че искате да премахнете модула?');
@@ -52,7 +52,7 @@ class EcontDeliveryPayment extends PaymentModule {
     }
 
     private function orderConfirmationMessage($message = 'Възникна грешка', $dontTranslate = false) {
-        $message = "Гарантирано с Еконт: {$message}";
+        $message = "Гарантирано от Еконт: {$message}";
         return '<p class="text-danger">' . ($dontTranslate ? $message : $this->l($message)) . '</p>';
     }
 
@@ -67,9 +67,18 @@ class EcontDeliveryPayment extends PaymentModule {
 
         $paymentOption = new PaymentOption();
 
-        $paymentOption->setCallToActionText($this->l('Гарантирано с Еконт'));
+        $paymentOption->setCallToActionText($this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_TITLE')));
         $paymentOption->setAction($this->context->link->getModuleLink($this->name, 'validation', array()));
-        $paymentOption->setAdditionalInformation('<p>' . $this->l('Плащане онлайн чрез системата на Еконт') . '</p>');
+        ob_start() ;?>
+            <?php $paymentLogo = trim(Configuration::get('ECONT_DELIVERY_PAYMENT_LOGO')); ?>
+            <?php if (!empty($paymentLogo)): ?>
+                <?php $econtDelivery = new EcontDelivery(); ?>
+                <img src="<?php echo rtrim($this->context->link->getBaseLink(), '/')  . $econtDelivery->getPathUri() . "view/img/econt_payment_logo_{$paymentLogo}.png"; ?>" alt="Econt Delivery Payment Logo" style="margin-bottom: 15px;">
+            <?php endif; ?>
+            <p><?php echo $this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_DESCRIPTION')); ?></p>
+        <?php $additionalInformation = ob_get_contents();
+        ob_end_clean();
+        $paymentOption->setAdditionalInformation($additionalInformation);
 
         return array($paymentOption);
     }
