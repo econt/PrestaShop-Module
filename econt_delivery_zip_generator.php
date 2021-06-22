@@ -58,13 +58,11 @@ define('MODULE_ZIP_FILE_NAME', 'EcontDelivery-PrestaShop-Module.zip');
 
 foreach ([
     SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . SHIPPING_MODULE_NAME . '.php',
-    PAYMENT_MODULE_DIR .  DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME . '.php'
+     SHIPPING_MODULE_DIR. DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME .  DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME . '.php'
 ] as $versionFile) file_put_contents($versionFile, preg_replace('/\$this->version = \'(.*)\'; \/\/ change from zip generator/i', '$this->version = \'' . MODULE_VERSION. '\'; // change from zip generator', file_get_contents($versionFile), 1));
 
 @unlink(SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . 'config.xml');
 @unlink(PAYMENT_MODULE_DIR . DIRECTORY_SEPARATOR . 'config.xml');
-recursiveRemoveDir(SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME);
-recursiveCopyDir(PAYMENT_MODULE_DIR, SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME);
 
 createModuleZip(SHIPPING_MODULE_NAME);
 
