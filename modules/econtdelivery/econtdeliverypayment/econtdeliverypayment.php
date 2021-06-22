@@ -8,7 +8,7 @@ if (!defined('_PS_VERSION_')) {
 
 class EcontDeliveryPayment extends PaymentModule {
 
-    private $hooks = array(//wqefqwefqwefewqfqw
+    private $hooks = array(
         'paymentOptions',
         'orderConfirmation'
     );
@@ -49,6 +49,35 @@ class EcontDeliveryPayment extends PaymentModule {
         foreach ($this->hooks as $hook) if (!$this->unregisterHook($hook)) return false;
 
         return true;
+    }
+
+    public function logEvent($event) {
+        $event['plugin_type'] = 'prestashop';
+        $deliveryBaseURL = Configuration::get('ECONT_DELIVERY_ENDPOINT');
+        $deliverySecret = Configuration::get('ECONT_DELIVERY_SECRET');
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/PluginsService.logEvent.json");
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            "Authorization: {$deliverySecret}"
+        ]);
+        curl_setopt($curl, CURLOPT_POST, true);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode([$event]));
+        curl_setopt($curl, CURLOPT_TIMEOUT, 6);
+        curl_exec($curl);
+        curl_close($curl);
+    }
+
+    public function disable($force_all = false) {
+        $this->logEvent(['action' => 'payment_enabled', 'value' => '0']);
+        return parent::disable($force_all);
+    }
+    public function enable($force_all = false) {
+        $this->logEvent(['action' => 'payment_enabled', 'value' => '1']);
+        return parent::enable($force_all);
     }
 
     private function orderConfirmationMessage($message = 'Възникна грешка', $dontTranslate = false) {
