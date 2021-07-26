@@ -86,7 +86,7 @@ class EcontDelivery extends Module {
     public function __construct() {
         $this->name = 'econtdelivery';
         $this->tab = 'shipping_logistics';
-        $this->version = '2.0.1'; // change from zip generator
+        $this->version = '2.0.2'; // change from zip generator
         $this->author = 'ITPartner';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = array(
@@ -168,7 +168,7 @@ class EcontDelivery extends Module {
 
             Configuration::updateValue('ECONT_DELIVERY_PAYMENT_TITLE', $this->l('Гарантирано от Еконт'));
             Configuration::updateValue('ECONT_DELIVERY_PAYMENT_LOGO', 'dark');
-            Configuration::updateValue('ECONT_DELIVERY_PAYMENT_DESCRIPTION', $this->l('Плащане с карта, при което се резервира сумата за поръчката и доставката. Плащате, когато приемете пратката. При отказ, стойността на стоката автоматично се освобождава от картата. Приспада се само доставката. Пазарувате с карта без притеснения дали ще получите средствата си обратно при връщане.'));
+            Configuration::updateValue('ECONT_DELIVERY_PAYMENT_DESCRIPTION', $this->l('Плащане с карта, при което сумата се резервира по сметката ви. Ще бъде изтеглена едва когато приемете пратката си. Ако я откажете или върнете веднага, сумата от наложения платеж се освобождава и отново е на ваше разположение.'));
         }
 
         try {

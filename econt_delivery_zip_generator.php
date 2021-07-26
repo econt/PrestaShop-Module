@@ -53,7 +53,7 @@ function createModuleZip($moduleName) {
     return $moduleZipFile;
 }
 
-define('MODULE_VERSION', '2.0.1');
+define('MODULE_VERSION', '2.0.2');
 define('MODULE_ZIP_FILE_NAME', 'EcontDelivery-PrestaShop-Module.zip');
 
 foreach ([
