@@ -43,10 +43,14 @@ function createModuleZip($moduleName) {
     @unlink($moduleZipFile);
 
     $zip = new ZipArchive();
-    if ($zip->open($moduleZipFile, ZipArchive::CREATE) !== true) die('error 1');
-    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PRESTASHOP_MODULES_DIR . DIRECTORY_SEPARATOR . $moduleName, FilesystemIterator::SKIP_DOTS)) as $file) {
-        $zip->addFile($file, DIRECTORY_SEPARATOR . str_replace(PRESTASHOP_MODULES_DIR, '', $file));
+    if ($zip->open($moduleZipFile, ZipArchive::CREATE) !== true) {
+        die('error 1');
     }
+
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(PRESTASHOP_MODULES_DIR . DIRECTORY_SEPARATOR . $moduleName, FilesystemIterator::SKIP_DOTS)) as $file) {
+        $zip->addFile($file->getPathname(), ltrim(str_replace(PRESTASHOP_MODULES_DIR, '', $file->getPathname()), '/'));
+    }
+
     $zip->setArchiveComment('Version: ' . MODULE_VERSION);
     $zip->close();
 
@@ -59,7 +63,9 @@ define('MODULE_ZIP_FILE_NAME', 'EcontDelivery-PrestaShop-Module.zip');
 foreach ([
     SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . SHIPPING_MODULE_NAME . '.php',
     PAYMENT_MODULE_DIR .  DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME . '.php'
-] as $versionFile) file_put_contents($versionFile, preg_replace('/\$this->version = \'(.*)\'; \/\/ change from zip generator/i', '$this->version = \'' . MODULE_VERSION. '\'; // change from zip generator', file_get_contents($versionFile), 1));
+] as $versionFile) {
+    file_put_contents($versionFile, preg_replace('/\$this->version = \'(.*)\'; \/\/ change from zip generator/i', '$this->version = \'' . MODULE_VERSION. '\'; // change from zip generator', file_get_contents($versionFile), 1));
+}
 
 @unlink(SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . 'config.xml');
 @unlink(PAYMENT_MODULE_DIR . DIRECTORY_SEPARATOR . 'config.xml');
