@@ -3,7 +3,7 @@
 class EcontDeliveryPaymentValidationModuleFrontController extends ModuleFrontController {
 
     private function redirectWithMessage($message = 'Възникна грешка', $dontTranslate = false) {
-        $message = "Гарантирано от Еконт: {$message}";
+        $message = "EcontPay: {$message}";
         $this->errors[] = ($dontTranslate ? $message : $this->l($message));
         $this->redirectWithNotifications(__PS_BASE_URI__ . '?' . http_build_query(array( 'controller' => 'order')));
     }
