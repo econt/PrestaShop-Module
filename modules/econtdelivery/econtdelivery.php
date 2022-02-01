@@ -202,6 +202,8 @@ class EcontDelivery extends Module {
 
         return true;
     }
+
+
     public function getContent() {
         $output = '';
 
@@ -210,7 +212,7 @@ class EcontDelivery extends Module {
             $newSecret = Tools::getValue('ECONT_DELIVERY_SECRET');
 
             $curl = curl_init();
-            curl_setopt($curl, CURLOPT_URL, "{$newEndpointURL}/services/OrdersService.getTrace.json");
+            curl_setopt($curl, CURLOPT_URL, "{$newEndpointURL}/services/PluginsService.logEvent.json");
             curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
             curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
@@ -219,9 +221,10 @@ class EcontDelivery extends Module {
                 "Authorization: {$newSecret}"
             ]);
             curl_setopt($curl, CURLOPT_POST, true);
-            curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode(array(
-                'orderNumber' => 4812384
-            )));
+            curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode([[
+                'plugin_type' => 'prestashop',
+                'action' => 'activate'
+            ]]));
             curl_setopt($curl, CURLOPT_TIMEOUT, 6);
             $res = curl_exec($curl);
             $response = json_decode($res, true);

@@ -51,6 +51,35 @@ class EcontDeliveryPayment extends PaymentModule {
         return true;
     }
 
+    public function logEvent($event) {
+        $event['plugin_type'] = 'prestashop';
+        $deliveryBaseURL = Configuration::get('ECONT_DELIVERY_ENDPOINT');
+        $deliverySecret = Configuration::get('ECONT_DELIVERY_SECRET');
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/PluginsService.logEvent.json");
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            "Authorization: {$deliverySecret}"
+        ]);
+        curl_setopt($curl, CURLOPT_POST, true);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode([$event]));
+        curl_setopt($curl, CURLOPT_TIMEOUT, 6);
+        curl_exec($curl);
+        curl_close($curl);
+    }
+
+    public function disable($force_all = false) {
+        $this->logEvent(['action' => 'payment_enabled', 'value' => '0']);
+        return parent::disable($force_all);
+    }
+    public function enable($force_all = false) {
+        $this->logEvent(['action' => 'payment_enabled', 'value' => '1']);
+        return parent::enable($force_all);
+    }
+
     private function orderConfirmationMessage($message = 'Възникна грешка', $dontTranslate = false) {
         $message = "Гарантирано от Еконт: {$message}";
         return '<p class="text-danger">' . ($dontTranslate ? $message : $this->l($message)) . '</p>';
@@ -70,12 +99,12 @@ class EcontDeliveryPayment extends PaymentModule {
         $paymentOption->setCallToActionText($this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_TITLE')));
         $paymentOption->setAction($this->context->link->getModuleLink($this->name, 'validation', array()));
         ob_start() ;?>
-            <?php $paymentLogo = trim(Configuration::get('ECONT_DELIVERY_PAYMENT_LOGO')); ?>
-            <?php if (!empty($paymentLogo)): ?>
-                <?php $econtDelivery = new EcontDelivery(); ?>
-                <img src="<?php echo rtrim($this->context->link->getBaseLink(), '/')  . $econtDelivery->getPathUri() . "view/img/econt_payment_logo_{$paymentLogo}.png"; ?>" alt="Econt Delivery Payment Logo" style="margin-bottom: 15px;">
-            <?php endif; ?>
-            <p><?php echo $this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_DESCRIPTION')); ?></p>
+        <?php $paymentLogo = trim(Configuration::get('ECONT_DELIVERY_PAYMENT_LOGO')); ?>
+        <?php if (!empty($paymentLogo)): ?>
+            <?php $econtDelivery = new EcontDelivery(); ?>
+            <img src="<?php echo rtrim($this->context->link->getBaseLink(), '/')  . $econtDelivery->getPathUri() . "view/img/econt_payment_logo_{$paymentLogo}.png"; ?>" alt="Econt Delivery Payment Logo" style="margin-bottom: 15px;">
+        <?php endif; ?>
+        <p><?php echo $this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_DESCRIPTION')); ?></p>
         <?php $additionalInformation = ob_get_contents();
         ob_end_clean();
         $paymentOption->setAdditionalInformation($additionalInformation);
@@ -101,10 +130,10 @@ class EcontDeliveryPayment extends PaymentModule {
         if(!$deliveryBaseURL || !$deliverySecret) return $this->orderConfirmationMessage('Невалидна конфигурация');
 
         if (@$_GET['econtdeliverypayment_hash'] !== EcontDelivery::getProtectionHash(array(
-            'id_order' => (string)@$order->id,
-            'econtdeliverypayment_transaction_id' => (string)@$_GET['econtdeliverypayment_transaction_id'],
-            'econtdeliverypayment_time' => (string)@$_GET['econtdeliverypayment_time']
-        ))) return $this->orderConfirmationMessage('Невалидна трансакция');
+                'id_order' => (string)@$order->id,
+                'econtdeliverypayment_transaction_id' => (string)@$_GET['econtdeliverypayment_transaction_id'],
+                'econtdeliverypayment_time' => (string)@$_GET['econtdeliverypayment_time']
+            ))) return $this->orderConfirmationMessage('Невалидна трансакция');
 
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/PaymentsService.confirmPayment.json");
