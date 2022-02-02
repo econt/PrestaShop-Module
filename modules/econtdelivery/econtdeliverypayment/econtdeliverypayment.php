@@ -30,7 +30,7 @@ class EcontDeliveryPayment extends PaymentModule {
 
         parent::__construct();
 
-        $this->displayName = $this->l('Гарантирано от Еконт');
+        $this->displayName = $this->l('EcontPay');
         $this->description = $this->l('Допълнение към модула "Достави с Еконт".');
 
         $this->confirmUninstall = $this->l('Сигурни ли сте, че искате да премахнете модула?');
@@ -81,7 +81,7 @@ class EcontDeliveryPayment extends PaymentModule {
     }
 
     private function orderConfirmationMessage($message = 'Възникна грешка', $dontTranslate = false) {
-        $message = "Гарантирано от Еконт: {$message}";
+        $message = "EcontPay: {$message}";
         return '<p class="text-danger">' . ($dontTranslate ? $message : $this->l($message)) . '</p>';
     }
 
@@ -102,9 +102,8 @@ class EcontDeliveryPayment extends PaymentModule {
         <?php $paymentLogo = trim(Configuration::get('ECONT_DELIVERY_PAYMENT_LOGO')); ?>
         <?php if (!empty($paymentLogo)): ?>
             <?php $econtDelivery = new EcontDelivery(); ?>
-            <img src="<?php echo rtrim($this->context->link->getBaseLink(), '/')  . $econtDelivery->getPathUri() . "view/img/econt_payment_logo_{$paymentLogo}.png"; ?>" alt="Econt Delivery Payment Logo" style="margin-bottom: 15px;">
+            <img src="<?php echo rtrim($this->context->link->getBaseLink(), '/')  . $econtDelivery->getPathUri() . "view/img/Econt_pay.svg"; ?>" alt="Econt Delivery Payment Logo" style="margin-bottom: 15px;">
         <?php endif; ?>
-        <p><?php echo $this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_DESCRIPTION')); ?></p>
         <?php $additionalInformation = ob_get_contents();
         ob_end_clean();
         $paymentOption->setAdditionalInformation($additionalInformation);
