@@ -416,22 +416,25 @@ class EcontDelivery extends Module {
             $row = Db::getInstance()->getRow("SELECT * FROM {$pref}econt_delivery_order_info WHERE id_order = $orderID");
             $econtDeliveryInfo = json_decode($row['info'],true);
 
+            $o = new Order($orderID);
+            $additionalCosts = $this->getAdditionalShippingCosts($o->getProducts());
             if ($order->module === 'ps_cashondelivery') {
-                return @$econtDeliveryInfo['shipping_price_cod'];
+                return @$econtDeliveryInfo['shipping_price_cod'] + $additionalCosts;
             } elseif ($order->module === $this->econtDeliveryPaymentModule['name']) {
-                return @$econtDeliveryInfo['shipping_price_cod_e'];
+                return @$econtDeliveryInfo['shipping_price_cod_e'] + $additionalCosts;
             } else {
-                return @$econtDeliveryInfo['shipping_price'];
+                return @$econtDeliveryInfo['shipping_price'] + $additionalCosts;
             }
         } else if ($this->context->cookie->{"econt_delivery_info-".$cart->id}) {
+            $additionalCosts = $this->getAdditionalShippingCosts($cart->getProducts());
             if($econtDeliveryInfo = json_decode($this->context->cookie->{"econt_delivery_info-".$cart->id}, true)) {
                 $controllerClassName = get_class($this->context->controller);
                 if ($controllerClassName === 'Ps_CashondeliveryValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod'];
+                    return $econtDeliveryInfo['shipping_price_cod'] + $additionalCosts;
                 } elseif ($controllerClassName === 'EcontDeliveryPaymentValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod_e'];
+                    return $econtDeliveryInfo['shipping_price_cod_e'] + $additionalCosts;
                 } else {
-                    return $econtDeliveryInfo['shipping_price'];
+                    return $econtDeliveryInfo['shipping_price'] + $additionalCosts;
                 }
             }
             return 0;
@@ -441,6 +444,24 @@ class EcontDelivery extends Module {
     }
     public function getOrderShippingCostExternal($params) {
         return $this->getOrderShippingCost($params);
+    }
+    public function getAdditionalShippingCosts($products) {
+        $price = 0;
+
+        $handlingFees = Configuration::get('PS_SHIPPING_HANDLING');
+        // Adding handling charges
+        $carrier = new Carrier(Configuration::get('ECONT_DELIVERY_CARRIER_ID'));
+        if ($carrier->shipping_handling) {
+            $price += $handlingFees;
+        }
+
+        // Additional Shipping Cost per product
+        foreach ($products as $p) {
+            if (!$p['is_virtual']) {
+                $price += $p['additional_shipping_cost'] * intval($p['cart_quantity'] ? $p['cart_quantity'] : $p['product_quantity']);
+            }
+        }
+        return $price;
     }
     public function syncOrder($orderID, $paymentToken = '') {
         if (!($deliveryBaseURL = Configuration::get('ECONT_DELIVERY_ENDPOINT'))) return;
@@ -500,6 +521,17 @@ class EcontDelivery extends Module {
                 'totalWeight' => $product['product_weight'] * $product['product_quantity']
             );
             $d -= $product['total_price_tax_incl'];
+        }
+
+        if(($additionalShippingCosts = $this->getAdditionalShippingCosts($o->getProducts()))) {
+            $order['items'][] = array(
+                'name' => 'Допълнителна такса за опаковане и доставка',
+                'SKU' => '',
+                'URL' => '',
+                'count' => 1,
+                'totalPrice' => $additionalShippingCosts,
+                'totalWeight' => 0
+            );
         }
 
         if(round($d,2) != 0) {
