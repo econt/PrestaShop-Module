@@ -86,7 +86,7 @@ class EcontDelivery extends Module {
     public function __construct() {
         $this->name = 'econtdelivery';
         $this->tab = 'shipping_logistics';
-        $this->version = '2.0.2'; // change from zip generator
+        $this->version = '2.0.3'; // change from zip generator
         $this->author = 'ITPartner';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = array(
@@ -554,17 +554,17 @@ class EcontDelivery extends Module {
     }
     public function hookDisplayCheckoutSummaryTop($params) {
         if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
-            $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
+            //$params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
         }
     }
     public function hookDisplayShoppingCart($params) {
         if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
-            $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
+            //$params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
         }
     }
     public function hookDisplayCheckoutSubtotalDetails($params) {
         if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
-            $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
+            //$params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
         }
     }
     public function hookActionDispatcherBefore() {
