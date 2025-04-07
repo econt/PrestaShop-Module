@@ -31,9 +31,6 @@ class EcontDelivery extends Module {
         'actionCarrierUpdate',
         'displayCarrierExtraContent',
         'actionDispatcherBefore',
-        'displayShoppingCart',
-        'displayCheckoutSubtotalDetails',
-        'displayCheckoutSummaryTop',
         'actionValidateOrder',
         'actionOrderStatusPostUpdate',
         'displayAdminOrderTabShip',
@@ -551,21 +548,6 @@ class EcontDelivery extends Module {
     }
     public function hookActionOrderStatusPostUpdate($params) {
         $this->syncOrder($params['id_order']);
-    }
-    public function hookDisplayCheckoutSummaryTop($params) {
-        if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
-            //$params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
-        }
-    }
-    public function hookDisplayShoppingCart($params) {
-        if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
-            //$params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
-        }
-    }
-    public function hookDisplayCheckoutSubtotalDetails($params) {
-        if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
-            //$params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
-        }
     }
     public function hookActionDispatcherBefore() {
         if (
