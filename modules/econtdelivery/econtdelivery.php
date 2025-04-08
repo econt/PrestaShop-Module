@@ -31,6 +31,9 @@ class EcontDelivery extends Module {
         'actionCarrierUpdate',
         'displayCarrierExtraContent',
         'actionDispatcherBefore',
+        'displayShoppingCart',
+        'displayCheckoutSubtotalDetails',
+        'displayCheckoutSummaryTop',
         'actionValidateOrder',
         'actionOrderStatusPostUpdate',
         'displayAdminOrderTabShip',
@@ -407,7 +410,7 @@ class EcontDelivery extends Module {
         if($cart->id) $order = Order::getByCartId($cart->id);
         if(!$order && !empty($_REQUEST['id_order'])) $order = new Order($_REQUEST['id_order']);
 
-        $orderID = @intval($order->id);
+        $orderID = ($order !== null) ? intval($order->id) : 0;
         if ($orderID > 0) {
             $pref = _DB_PREFIX_;
             $row = Db::getInstance()->getRow("SELECT * FROM {$pref}econt_delivery_order_info WHERE id_order = $orderID");
@@ -548,6 +551,21 @@ class EcontDelivery extends Module {
     }
     public function hookActionOrderStatusPostUpdate($params) {
         $this->syncOrder($params['id_order']);
+    }
+    public function hookDisplayCheckoutSummaryTop($params) {
+        if(intval(_PS_VERSION_) < 8 && $params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
+            $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
+        }
+    }
+    public function hookDisplayShoppingCart($params) {
+        if(intval(_PS_VERSION_) < 8 && $params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
+            $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
+        }
+    }
+    public function hookDisplayCheckoutSubtotalDetails($params) {
+        if(intval(_PS_VERSION_) < 8 && $params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
+            $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
+        }
     }
     public function hookActionDispatcherBefore() {
         if (
