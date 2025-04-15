@@ -414,7 +414,7 @@ class EcontDelivery extends Module {
         if ($orderID > 0) {
             $pref = _DB_PREFIX_;
             $row = Db::getInstance()->getRow("SELECT * FROM {$pref}econt_delivery_order_info WHERE id_order = $orderID");
-            $econtDeliveryInfo = json_decode($row['info'],true);
+            $econtDeliveryInfo = json_decode($row['info'] ?? '', true) ?? [];
 
             if ($order->module === 'ps_cashondelivery') {
                 return @$econtDeliveryInfo['shipping_price_cod'];
