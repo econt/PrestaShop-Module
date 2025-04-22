@@ -720,9 +720,9 @@ class EcontDelivery extends Module {
         curl_close($curl);
 
         if (empty($response['error'])) {
-            if ($order->shipping_number != $response['shipmentNumber']) {
+            if ($order->tracking_number != $response['shipmentNumber']) {
                 $order->setWsShippingNumber($response['shipmentNumber']);
-                $order->shipping_number = $response['shipmentNumber'];
+                $order->tracking_number = $response['shipmentNumber'];
                 $order->update();
             }
         }
@@ -767,7 +767,7 @@ class EcontDelivery extends Module {
                         ||  this.href.indexOf('generate-delivery-slip-pdf') > 0
                     ) {
                         let num = $('.shipping_number_show').text().trim();
-                        if (!num) num = '<?=$order->shipping_number?>';
+                        if (!num) num = '<?=$order->tracking_number?>';
                         if (num) {
                             window.open(<?=json_encode($response['pdfURL']);?>);
                         } else {
