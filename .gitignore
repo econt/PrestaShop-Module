@@ -2,6 +2,7 @@
 !/.gitignore
 !/codecompletion/**
 !/modules/econtdelivery/**
+!/modules/econtdelivery/controllers/front/**
 !/modules/econtdeliverypayment/**
 !/econt_delivery_zip_generator.php
 !/EcontDelivery-PrestaShop-Module.zip

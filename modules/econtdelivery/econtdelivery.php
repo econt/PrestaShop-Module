@@ -405,7 +405,7 @@ class EcontDelivery extends Module {
         return true;
     }
 
-    public function getOrderShippingCost($cart) {
+    public function getOrderShippingCost($cart, $shipping_cost) {
         $order = null;
         if($cart->id) $order = Order::getByCartId($cart->id);
         if(!$order && !empty($_REQUEST['id_order'])) $order = new Order($_REQUEST['id_order']);
@@ -424,6 +424,19 @@ class EcontDelivery extends Module {
                 return @$econtDeliveryInfo['shipping_price'];
             }
         } else if ($this->context->cookie->{"econt_delivery_info-".$cart->id}) {
+                
+            // Ajax session callback
+            if($econtDeliveryInfo = json_decode($_SESSION['econt_delivery_info-'.$cart->id], true)) {
+                $controllerClassName = get_class($this->context->controller);
+                if ($controllerClassName === 'Ps_CashondeliveryValidationModuleFrontController') {
+                    return $econtDeliveryInfo['shipping_price_cod'];
+                } elseif ($controllerClassName === 'EcontDeliveryPaymentValidationModuleFrontController') {
+                    return $econtDeliveryInfo['shipping_price_cod_e'];
+                } else {
+                    return $econtDeliveryInfo['shipping_price'];
+                }
+            }
+                
             if($econtDeliveryInfo = json_decode($this->context->cookie->{"econt_delivery_info-".$cart->id}, true)) {
                 $controllerClassName = get_class($this->context->controller);
                 if ($controllerClassName === 'Ps_CashondeliveryValidationModuleFrontController') {
@@ -436,6 +449,19 @@ class EcontDelivery extends Module {
             }
             return 0;
         } else {
+        
+            // Ajax session callback
+            if($econtDeliveryInfo = json_decode($_SESSION['econt_delivery_info-'.$cart->id], true)) {
+                $controllerClassName = get_class($this->context->controller);
+                if ($controllerClassName === 'Ps_CashondeliveryValidationModuleFrontController') {
+                    return $econtDeliveryInfo['shipping_price_cod'];
+                } elseif ($controllerClassName === 'EcontDeliveryPaymentValidationModuleFrontController') {
+                    return $econtDeliveryInfo['shipping_price_cod_e'];
+                } else {
+                    return $econtDeliveryInfo['shipping_price'];
+                }
+            }
+        
             return 0;
         }
     }
@@ -674,6 +700,14 @@ class EcontDelivery extends Module {
                             }
                             $econtRadio.parents('.delivery-option').find('.carrier-price').text(labelTxt);
                             $hiddenInput.val(JSON.stringify(e.originalEvent.data));
+
+                            $.ajax({
+                                url: '/module/econtdelivery/ajax?ajax_function=set_econt_shipping_info',
+                                type: 'POST',
+                                data: e.originalEvent.data,
+                                dataType: 'json',
+                            });
+                            
                         }
                     }
                 });
