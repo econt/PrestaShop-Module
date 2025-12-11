@@ -16,7 +16,7 @@ class EcontDeliveryPayment extends PaymentModule {
     public function __construct() {
         $this->name = 'econtdeliverypayment';
         $this->tab = 'payments_gateways';
-        $this->version = '2.0.3'; // change from zip generator
+        $this->version = '2.0.2'; // change from zip generator
         $this->ps_versions_compliancy = array(
             'min' => '1.7',
             'max' => _PS_VERSION_

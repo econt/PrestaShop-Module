@@ -86,7 +86,7 @@ class EcontDelivery extends Module {
     public function __construct() {
         $this->name = 'econtdelivery';
         $this->tab = 'shipping_logistics';
-        $this->version = '2.0.3'; // change from zip generator
+        $this->version = '2.0.2'; // change from zip generator
         $this->author = 'ITPartner';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = array(
@@ -123,6 +123,8 @@ class EcontDelivery extends Module {
         $carrier->need_range = true;
 
         $econtDeliveryOrderInfoTable = _DB_PREFIX_ . 'econt_delivery_order_info';
+        $econtDeliveryCartInfoTable = _DB_PREFIX_.'econt_delivery_cart_info';
+
         $engine = _MYSQL_ENGINE_;
         Db::getInstance()->execute("
             CREATE TABLE IF NOT EXISTS `{$econtDeliveryOrderInfoTable}` (
@@ -131,6 +133,16 @@ class EcontDelivery extends Module {
                 PRIMARY KEY (`id_order`)
             )
             ENGINE={$engine}
+        ");
+
+        Db::getInstance()->execute("
+            CREATE TABLE IF NOT EXISTS `$econtDeliveryCartInfoTable` (
+                `id_cart` INT(10) UNSIGNED NOT NULL,
+                `info` MEDIUMTEXT NOT NULL,
+                `date_add` DATETIME NOT NULL,
+                PRIMARY KEY (`id_cart`)
+            )
+            ENGINE=$engine
         ");
 
         if ($carrier->add()) {
@@ -407,64 +419,42 @@ class EcontDelivery extends Module {
 
     public function getOrderShippingCost($cart, $shipping_cost) {
         $order = null;
-        if($cart->id) $order = Order::getByCartId($cart->id);
+        if($cart->id) {
+            $id_order = (int)Db::getInstance()->getValue('SELECT id_order FROM '._DB_PREFIX_.'orders WHERE id_cart = '.(int)$cart->id);
+            if ($id_order) {
+                $order = new Order($id_order);
+            }
+        }
         if(!$order && !empty($_REQUEST['id_order'])) $order = new Order($_REQUEST['id_order']);
 
-        $orderID = ($order !== null) ? intval($order->id) : 0;
-        if ($orderID > 0) {
+        // Check if we have an existing order with delivery info
+        if($orderID = @intval($order->id)) {
             $pref = _DB_PREFIX_;
             $row = Db::getInstance()->getRow("SELECT * FROM {$pref}econt_delivery_order_info WHERE id_order = $orderID");
-            $econtDeliveryInfo = json_decode($row['info'] ?? '', true) ?? [];
-
-            if ($order->module === 'ps_cashondelivery') {
-                return @$econtDeliveryInfo['shipping_price_cod'];
-            } elseif ($order->module === $this->econtDeliveryPaymentModule['name']) {
-                return @$econtDeliveryInfo['shipping_price_cod_e'];
-            } else {
-                return @$econtDeliveryInfo['shipping_price'];
-            }
-        } else if ($this->context->cookie->{"econt_delivery_info-".$cart->id}) {
-                
-            // Ajax session callback
-            if($econtDeliveryInfo = json_decode($_SESSION['econt_delivery_info-'.$cart->id], true)) {
-                $controllerClassName = get_class($this->context->controller);
-                if ($controllerClassName === 'Ps_CashondeliveryValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod'];
-                } elseif ($controllerClassName === 'EcontDeliveryPaymentValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod_e'];
-                } else {
-                    return $econtDeliveryInfo['shipping_price'];
-                }
-            }
-                
-            if($econtDeliveryInfo = json_decode($this->context->cookie->{"econt_delivery_info-".$cart->id}, true)) {
-                $controllerClassName = get_class($this->context->controller);
-                if ($controllerClassName === 'Ps_CashondeliveryValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod'];
-                } elseif ($controllerClassName === 'EcontDeliveryPaymentValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod_e'];
-                } else {
-                    return $econtDeliveryInfo['shipping_price'];
-                }
-            }
-            return 0;
-        } else {
-        
-            // Ajax session callback
-            if($econtDeliveryInfo = json_decode($_SESSION['econt_delivery_info-'.$cart->id], true)) {
-                $controllerClassName = get_class($this->context->controller);
-                if ($controllerClassName === 'Ps_CashondeliveryValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod'];
-                } elseif ($controllerClassName === 'EcontDeliveryPaymentValidationModuleFrontController') {
-                    return $econtDeliveryInfo['shipping_price_cod_e'];
-                } else {
-                    return $econtDeliveryInfo['shipping_price'];
-                }
-            }
-        
-            return 0;
+            $econtDeliveryInfo = json_decode($row['info'],true);
+            $price = ($order->module == 'ps_cashondelivery' ? $econtDeliveryInfo['shipping_price_cod'] : $econtDeliveryInfo['shipping_price']);
+            return (float)$price;
         }
+        
+        // Check DATABASE for cart delivery info
+        $cartData = $this->getCartDeliveryInfo($cart->id);
+        if($cartData) {
+            $econtDeliveryInfo = json_decode($cartData, true);
+            if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price'])) {
+                $price = $econtDeliveryInfo['shipping_price'];
+                // Check for cash on delivery
+                $controllerClass = get_class($this->context->controller);
+                if($controllerClass == 'Ps_CashondeliveryValidationModuleFrontController' 
+                   || (isset($_REQUEST['payment_method']) && strpos($_REQUEST['payment_method'], 'cashondelivery') !== false)) {
+                    $price = isset($econtDeliveryInfo['shipping_price_cod']) ? $econtDeliveryInfo['shipping_price_cod'] : $price;
+                }
+                return (float)$price;
+            }
+        }
+        
+        return 0;
     }
+
     public function getOrderShippingCostExternal($params) {
         return $this->getOrderShippingCost($params);
     }
@@ -554,8 +544,12 @@ class EcontDelivery extends Module {
             curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($order));
             curl_setopt($curl, CURLOPT_TIMEOUT, 6);
             curl_exec($curl);
+            $response = json_decode(curl_exec($curl), true);
+
             curl_close($curl);
-        } catch (Exception $exception) {}
+        } catch (Exception $exception) {
+            $this->logger("Curl error syncing order $orderID: " . $exception->getMessage());
+        }
     }
 
     public function hookActionCarrierUpdate($params) {
@@ -567,44 +561,58 @@ class EcontDelivery extends Module {
         $this->context->cookie->{"econt_delivery_info-".$params['cart']->id} = null;
     }
     public function hookActionValidateOrder($params) {
-        if((intval($params['order']->id)) && ($econtDeliveryInfo = json_decode($this->context->cookie->{"econt_delivery_info-".$params['cart']->id},true))) {
+        $cartId = (int)$params['cart']->id;
+        $cartData = $this->getCartDeliveryInfo($cartId);
+        
+        if((intval($params['order']->id)) && $cartData && ($econtDeliveryInfo = json_decode($cartData, true))) {
             Db::getInstance()->insert('econt_delivery_order_info',array(
                 'id_order' => (int) $params['order']->id,
                 'info' => Db::getInstance()->escape(json_encode($econtDeliveryInfo, JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE))
             ),false,false,Db::REPLACE);
-            $this->context->cookie->{"econt_delivery_info-".$params['cart']->id} = null;
         }
     }
+
     public function hookActionOrderStatusPostUpdate($params) {
         $this->syncOrder($params['id_order']);
     }
     public function hookDisplayCheckoutSummaryTop($params) {
-        if(intval(_PS_VERSION_) < 8 && $params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
+        if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
             $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
         }
     }
     public function hookDisplayShoppingCart($params) {
-        if(intval(_PS_VERSION_) < 8 && $params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
+        if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
             $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
         }
     }
     public function hookDisplayCheckoutSubtotalDetails($params) {
-        if(intval(_PS_VERSION_) < 8 && $params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
+        if($params['smarty'] && round($params['smarty']->tpl_vars['cart']->value['subtotals']['shipping']['amount'],2) == 0) {
             $params['smarty']->tpl_vars['cart']->value['subtotals']['shipping'] = null;
         }
     }
-    public function hookActionDispatcherBefore() {
-        if (
-                isset($_REQUEST['confirmDeliveryOption'])
-            &&  $_REQUEST['confirmDeliveryOption']
-            &&  $econtDeliveryInfo = json_decode($_REQUEST['econt_delivery_info'],true)
-        ) $this->context->cookie->{"econt_delivery_info-".$this->context->cookie->id_cart} = $_REQUEST['econt_delivery_info'];
-        if (
-                isset($_REQUEST['controller'])
-            &&  $_REQUEST['controller'] == 'AdminOrders'
-            &&  isset($_REQUEST['submitAddressShipping'])
-            &&  !empty($_REQUEST['id_order']) && !empty($_REQUEST['econt_delivery_customer_info'])
-        ) {
+    public function hookActionDispatcherBefore($a) {
+        // Handle AJAX save request from frontend
+        if(isset($_REQUEST['ajax_econt_save']) && isset($_REQUEST['econt_data'])) {
+            $cartId = (int)$this->context->cookie->id_cart;
+            $econtDeliveryInfo = json_decode($_REQUEST['econt_data'], true);
+            if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && $cartId) {
+                $this->saveCartDeliveryInfo($cartId, $_REQUEST['econt_data']);
+                if(isset($_REQUEST['ajax'])) {
+                    die(json_encode(['success' => true, 'price' => $econtDeliveryInfo['shipping_price']]));
+                }
+            }
+        }
+        
+        // Also check regular POST
+        if(!empty($_REQUEST['econt_delivery_info'])) {
+            $cartId = (int)$this->context->cookie->id_cart;
+            $econtDeliveryInfo = json_decode($_REQUEST['econt_delivery_info'], true);
+            if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && $cartId) {
+                $this->saveCartDeliveryInfo($cartId, $_REQUEST['econt_delivery_info']);
+            }
+        }
+        
+        if(isset($_REQUEST['controller']) && $_REQUEST['controller'] == 'AdminOrders' && isset($_REQUEST['submitAddressShipping']) && !empty($_REQUEST['id_order']) && !empty($_REQUEST['econt_delivery_customer_info'])) {
             Db::getInstance()->insert('econt_delivery_order_info',array(
                 'id_order' => $_REQUEST['id_order'],
                 'info' => Db::getInstance()->escape($_REQUEST['econt_delivery_customer_info']),
@@ -644,7 +652,7 @@ class EcontDelivery extends Module {
         $deliveryMethodPriceCD = $this->l('наложен платеж');
 
         ob_start();?>
-        <iframe id="econt_delivery_customer_info_frame" style="width:100%;height:612px;border:none;margin-top: 15px;" src="<?=$frameURL?>"></iframe>
+        <iframe id="econt_delivery_customer_info_frame" style="width:100%;height:800px;border:none;margin-top: 15px;" src="<?=$frameURL?>"></iframe>
         <input type="hidden" id="econt_delivery_info" name="econt_delivery_info">
         <script>
             document.addEventListener("DOMContentLoaded", function() {
@@ -700,14 +708,13 @@ class EcontDelivery extends Module {
                             }
                             $econtRadio.parents('.delivery-option').find('.carrier-price').text(labelTxt);
                             $hiddenInput.val(JSON.stringify(e.originalEvent.data));
-
+                            
                             $.ajax({
                                 url: '/module/econtdelivery/ajax?ajax_function=set_econt_shipping_info',
                                 type: 'POST',
                                 data: e.originalEvent.data,
                                 dataType: 'json',
                             });
-                            
                         }
                     }
                 });
@@ -715,6 +722,20 @@ class EcontDelivery extends Module {
         </script>
         <?php
         return ob_get_clean();
+    }
+    
+    public function setEcontShippingInfo() {
+        $json = array();
+
+        if(isset($_POST['shipping_price'])) {
+            unset($_POST['ajax_function']);
+            $_SESSION['econt_delivery_info-'.$this->context->cookie->id_cart] = json_encode($_POST);
+            $this->context->cookie->{"econt_delivery_info-".$this->context->cookie->id_cart} = json_encode($_POST);
+            $json['success'] = true;
+        }
+
+        echo json_encode($json);
+        exit;
     }
 
     public function hookDisplayAdminOrderMain($params) {
@@ -754,9 +775,9 @@ class EcontDelivery extends Module {
         curl_close($curl);
 
         if (empty($response['error'])) {
-            if ($order->tracking_number != $response['shipmentNumber']) {
+            if ($order->shipping_number != $response['shipmentNumber']) {
                 $order->setWsShippingNumber($response['shipmentNumber']);
-                $order->tracking_number = $response['shipmentNumber'];
+                $order->shipping_number = $response['shipmentNumber'];
                 $order->update();
             }
         }
@@ -801,7 +822,7 @@ class EcontDelivery extends Module {
                         ||  this.href.indexOf('generate-delivery-slip-pdf') > 0
                     ) {
                         let num = $('.shipping_number_show').text().trim();
-                        if (!num) num = '<?=$order->tracking_number?>';
+                        if (!num) num = '<?=$order->shipping_number?>';
                         if (num) {
                             window.open(<?=json_encode($response['pdfURL']);?>);
                         } else {
@@ -871,5 +892,57 @@ class EcontDelivery extends Module {
                 AND o.id_order = {$orderID}
         ",false);
         if(empty($orderData) || $orderData['id_carrier'] != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return;
+    }
+
+    private function ensureCartTableExists() {
+        static $checked = false;
+        if(!$checked) {
+            $pref = _DB_PREFIX_;
+            $engine = _MYSQL_ENGINE_;
+            Db::getInstance()->execute("
+                CREATE TABLE IF NOT EXISTS {$pref}econt_delivery_cart_info (
+                    id_cart INT(10) UNSIGNED NOT NULL,
+                    info MEDIUMTEXT NOT NULL,
+                    date_add DATETIME NOT NULL,
+                    PRIMARY KEY (id_cart)
+                ) ENGINE=$engine
+            ");
+            $checked = true;
+        }
+    }
+    
+    private function saveCartDeliveryInfo($cartId, $data) {
+        $this->ensureCartTableExists();
+        $pref = _DB_PREFIX_;
+        $escapedData = Db::getInstance()->escape($data);
+        Db::getInstance()->execute("
+            REPLACE INTO {$pref}econt_delivery_cart_info (id_cart, info, date_add) 
+            VALUES (".(int)$cartId.", '".$escapedData."', NOW())
+        ");
+        
+        // Clear PrestaShop shipping cache to force recalculation
+        Cache::clean('getPackageShippingCost_' . $cartId . '_*');
+    }
+    
+    private function getCartDeliveryInfo($cartId) {
+        $this->ensureCartTableExists();
+        $pref = _DB_PREFIX_;
+        $row = Db::getInstance()->getRow("SELECT info FROM {$pref}econt_delivery_cart_info WHERE id_cart = ".(int)$cartId);
+        return $row ? $row['info'] : null;
+    }
+    
+    private function clearCartDeliveryInfo($cartId) {
+        $this->ensureCartTableExists();
+        $pref = _DB_PREFIX_;
+        Db::getInstance()->execute("DELETE FROM {$pref}econt_delivery_cart_info WHERE id_cart = ".(int)$cartId);
+    }
+
+    public function logger($message)
+    {
+        $logger = new FileLogger();
+        $dir = version_compare(_PS_VERSION_, '1.7', '<') ? '/log/' : '/app/logs/';
+        $dir = version_compare(_PS_VERSION_, '8.0', '>') ? '/var/logs/' : $dir;
+        $logger->setFilename(_PS_ROOT_DIR_ . $dir . date('Y-m') . '_econt.log');
+        $logger->logInfo(date('H:i:s') . "\n" . $message);
     }
 }
