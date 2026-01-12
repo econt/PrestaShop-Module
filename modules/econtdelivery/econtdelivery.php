@@ -86,7 +86,7 @@ class EcontDelivery extends Module {
     public function __construct() {
         $this->name = 'econtdelivery';
         $this->tab = 'shipping_logistics';
-        $this->version = '2.0.2'; // change from zip generator
+        $this->version = '2.0.3'; // change from zip generator
         $this->author = 'ITPartner';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = array(
