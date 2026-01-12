@@ -16,7 +16,7 @@ define('SHIPPING_MODULE_NAME', 'econtdelivery');
 define('SHIPPING_MODULE_DIR', PRESTASHOP_MODULES_DIR . DIRECTORY_SEPARATOR . SHIPPING_MODULE_NAME);
 
 define('PAYMENT_MODULE_NAME', 'econtdeliverypayment');
-define('PAYMENT_MODULE_DIR', PRESTASHOP_MODULES_DIR . DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME);
+define('PAYMENT_MODULE_DIR', SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME);
 
 function recursiveRemoveDir($dirName) {
     if (!is_dir($dirName)) return false;
@@ -28,7 +28,15 @@ function recursiveRemoveDir($dirName) {
     return @rmdir($dirName);
 }
 function recursiveCopyDir($sourceDir, $destinationDir) {
+    if (!is_dir($sourceDir)) {
+        return false;
+    }
+    
     $dir = opendir($sourceDir);
+    if ($dir === false) {
+        return false;
+    }
+    
     @mkdir($destinationDir);
     while (($file = readdir($dir))) {
         if (( $file != '.' ) && ( $file != '..' )) {
@@ -37,6 +45,7 @@ function recursiveCopyDir($sourceDir, $destinationDir) {
         }
     }
     closedir($dir);
+    return true;
 }
 function createModuleZip($moduleName) {
     $moduleZipFile = CURRENT_DIR . DIRECTORY_SEPARATOR . MODULE_ZIP_FILE_NAME;
@@ -64,13 +73,15 @@ foreach ([
     SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . SHIPPING_MODULE_NAME . '.php',
     PAYMENT_MODULE_DIR .  DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME . '.php'
 ] as $versionFile) {
-    file_put_contents($versionFile, preg_replace('/\$this->version = \'(.*)\'; \/\/ change from zip generator/i', '$this->version = \'' . MODULE_VERSION. '\'; // change from zip generator', file_get_contents($versionFile), 1));
+    if (file_exists($versionFile)) {
+        $content = file_get_contents($versionFile);
+        $updatedContent = preg_replace('/\$this->version = \'(.*)\'; \/\/ change from zip generator/i', '$this->version = \'' . MODULE_VERSION. '\'; // change from zip generator', $content, 1);
+        file_put_contents($versionFile, $updatedContent);
+    }
 }
 
 @unlink(SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . 'config.xml');
 @unlink(PAYMENT_MODULE_DIR . DIRECTORY_SEPARATOR . 'config.xml');
-recursiveRemoveDir(SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME);
-recursiveCopyDir(PAYMENT_MODULE_DIR, SHIPPING_MODULE_DIR . DIRECTORY_SEPARATOR . PAYMENT_MODULE_NAME);
 
 createModuleZip(SHIPPING_MODULE_NAME);
 
