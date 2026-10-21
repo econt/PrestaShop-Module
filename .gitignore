@@ -1,5 +1,6 @@
 *
 !/.gitignore
+!/README.md
 !/codecompletion/**
 !/modules/econtdelivery/**
 !/modules/econtdelivery/controllers/front/**
