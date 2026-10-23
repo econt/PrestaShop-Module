@@ -37,7 +37,8 @@ class EcontDelivery extends Module {
         'actionValidateOrder',
         'actionOrderStatusPostUpdate',
         'displayAdminOrderTabShip',
-        'displayAdminOrderMain'
+        'displayAdminOrderMain',
+        'actionValidateStepComplete'
     );
 
     private function getAdminBaseURL() {
@@ -436,11 +437,11 @@ class EcontDelivery extends Module {
             return (float)$price;
         }
         
-        // Check DATABASE for cart delivery info
+        // Check DATABASE for cart delivery info (only data with prices from the Econt server)
         $cartData = $this->getCartDeliveryInfo($cart->id);
         if($cartData) {
             $econtDeliveryInfo = json_decode($cartData, true);
-            if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price'])) {
+            if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && !empty($econtDeliveryInfo['econt_server_prices'])) {
                 $price = $econtDeliveryInfo['shipping_price'];
                 // Check for cash on delivery
                 $controllerClass = get_class($this->context->controller);
@@ -451,7 +452,12 @@ class EcontDelivery extends Module {
                 return (float)$price;
             }
         }
-        
+
+        // Without checked data Econt is not available when a payment module creates the order, so it cannot become
+        // an Econt order with free shipping. On the checkout page it stays available, so the Econt form can be shown.
+        $controller = $this->context->controller;
+        if($controller instanceof ModuleFrontController && isset($controller->module) && $controller->module instanceof PaymentModule) return false;
+
         return 0;
     }
 
@@ -552,6 +558,21 @@ class EcontDelivery extends Module {
         }
     }
 
+    /**
+     * The delivery step with Econt is complete only with data from the Econt form whose prices come from the Econt
+     * server. PrestaShop calls the hook only for the module of the selected carrier.
+     */
+    public function hookActionValidateStepComplete($params) {
+        if(($params['step_name'] ?? '') !== 'delivery') return;
+
+        $cartData = $this->getCartDeliveryInfo((int)$this->context->cart->id);
+        $econtDeliveryInfo = $cartData ? json_decode($cartData, true) : null;
+        if(!empty($econtDeliveryInfo['econt_server_prices'])) return;
+
+        $params['completed'] = false;
+        $this->context->controller->errors[] = $this->l('Моля, изберете адрес или офис за доставка във формата на Еконт.');
+    }
+
     public function hookActionCarrierUpdate($params) {
         if ($params['carrier']->id_reference == Configuration::get('ECONT_DELIVERY_CARRIER_ID_REF')) {
             Configuration::updateValue('ECONT_DELIVERY_CARRIER_ID', $params['carrier']->id);
@@ -596,19 +617,23 @@ class EcontDelivery extends Module {
             $cartId = (int)$this->context->cookie->id_cart;
             $econtDeliveryInfo = json_decode($_REQUEST['econt_data'], true);
             if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && $cartId) {
-                $this->saveCartDeliveryInfo($cartId, $_REQUEST['econt_data']);
+                // The prices from the browser are replaced with prices from the Econt server.
+                // Data that cannot be checked is not saved and does not replace data checked earlier.
+                $econtDeliveryInfo = $this->withServerPrices($econtDeliveryInfo, $cartId);
+                if($econtDeliveryInfo) $this->saveCartDeliveryInfo($cartId, json_encode($econtDeliveryInfo));
                 if(isset($_REQUEST['ajax'])) {
-                    die(json_encode(['success' => true, 'price' => $econtDeliveryInfo['shipping_price']]));
+                    die(json_encode($econtDeliveryInfo ? ['success' => true, 'price' => $econtDeliveryInfo['shipping_price']] : ['success' => false]));
                 }
             }
         }
-        
+
         // Also check regular POST
         if(!empty($_REQUEST['econt_delivery_info'])) {
             $cartId = (int)$this->context->cookie->id_cart;
             $econtDeliveryInfo = json_decode($_REQUEST['econt_delivery_info'], true);
             if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && $cartId) {
-                $this->saveCartDeliveryInfo($cartId, $_REQUEST['econt_delivery_info']);
+                $econtDeliveryInfo = $this->withServerPrices($econtDeliveryInfo, $cartId);
+                if($econtDeliveryInfo) $this->saveCartDeliveryInfo($cartId, json_encode($econtDeliveryInfo));
             }
         }
         
@@ -911,6 +936,118 @@ class EcontDelivery extends Module {
         }
     }
     
+    /**
+     * Puts the shipping prices from the Econt server in the data from the Econt form.
+     *
+     * The prices in the form data come from the browser, so they are not trusted. The server asks
+     * OrdersService.getPrice with the cart total (without shipping), weight and currency. Econt has no getPrice for
+     * the EcontPay price, so that one is kept only between the prices without and with cash on delivery
+     * (Econt blocks the EcontPay amount with its own price anyway).
+     *
+     * @param array $econtDeliveryInfo data from the Econt form
+     * @param int $cartId the cart from the cookie: actionDispatcherBefore runs before the context has the cart
+     * @return array|null the data with the server prices, or null if the prices cannot be checked
+     */
+    private function withServerPrices($econtDeliveryInfo, $cartId) {
+        if(!is_array($econtDeliveryInfo) || !is_scalar($econtDeliveryInfo['id'] ?? null) || trim((string)$econtDeliveryInfo['id']) === '') return null;
+
+        $cart = new Cart((int)$cartId);
+        if(!Validate::isLoadedObject($cart)) return null;
+        $cartCurrency = new Currency((int)$cart->id_currency);
+
+        // getOrderTotal() reads the cart and the currency from the context, which do not have them yet here.
+        // They are set only for the calculation and then put back.
+        $contextCart = $this->context->cart;
+        $contextCurrency = $this->context->currency;
+        if(!Validate::isLoadedObject($contextCart)) $this->context->cart = $cart;
+        if(!Validate::isLoadedObject($contextCurrency)) $this->context->currency = $cartCurrency;
+        $orderTotal = round((float)$cart->getOrderTotal(true, Cart::BOTH_WITHOUT_SHIPPING), 2);
+        $orderWeight = round((float)$cart->getTotalWeight(), 3);
+        $this->context->cart = $contextCart;
+        $this->context->currency = $contextCurrency;
+
+        $customerInfoId = trim((string)$econtDeliveryInfo['id']);
+        $currency = $cartCurrency->iso_code;
+
+        // One request to Econt per address and cart, not on every step of the checkout
+        $cacheKey = md5(implode('|', [$customerInfoId, $orderTotal, $orderWeight, $currency]));
+        $cached = json_decode((string)$this->context->cookie->econt_delivery_server_prices, true);
+        $prices = (is_array($cached) && ($cached['key'] ?? '') === $cacheKey) ? $cached['prices'] : null;
+
+        if(!$prices) {
+            $price = $this->getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, false);
+            if($price === null) return null;
+
+            // Like the Econt form: an order without a total has no cash on delivery
+            $priceCod = $orderTotal > 0 ? $this->getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, true) : $price;
+            if($priceCod === null) return null;
+
+            $prices = ['shipping_price' => $price, 'shipping_price_cod' => $priceCod];
+            $this->context->cookie->econt_delivery_server_prices = json_encode(['key' => $cacheKey, 'prices' => $prices]);
+        }
+
+        $minPrice = min($prices['shipping_price'], $prices['shipping_price_cod']);
+        $maxPrice = max($prices['shipping_price'], $prices['shipping_price_cod']);
+        $priceCodE = round((float)($econtDeliveryInfo['shipping_price_cod_e'] ?? $maxPrice), 2);
+
+        $econtDeliveryInfo['shipping_price'] = $prices['shipping_price'];
+        $econtDeliveryInfo['shipping_price_cod'] = $prices['shipping_price_cod'];
+        $econtDeliveryInfo['shipping_price_cod_e'] = min(max($priceCodE, $minPrice), $maxPrice);
+        // getOrderShippingCost() and the delivery step take only data with this mark (not data saved before 2.0.4)
+        $econtDeliveryInfo['econt_server_prices'] = 1;
+
+        return $econtDeliveryInfo;
+    }
+
+    /**
+     * Shipping price (receiverDueAmount) from OrdersService.getPrice. Without an order number Econt calculates it
+     * on a temporary order and does not save anything.
+     *
+     * @return float|null null on a connection error or an error from Econt
+     */
+    private function getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, $cod) {
+        if(!($deliveryBaseURL = Configuration::get('ECONT_DELIVERY_ENDPOINT'))) return null;
+        if(!($deliverySecret = Configuration::get('ECONT_DELIVERY_SECRET'))) return null;
+
+        $request = [
+            'cod' => (bool)$cod,
+            'currency' => $currency,
+            'customerInfo' => ['id' => $customerInfoId],
+            'items' => [[
+                'name' => 'Order',
+                'count' => 1,
+                'totalPrice' => $orderTotal,
+                'totalWeight' => $orderWeight
+            ]]
+        ];
+
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/OrdersService.getPrice.json");
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            "Authorization: {$deliverySecret}"
+        ]);
+        curl_setopt($curl, CURLOPT_POST, true);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($request));
+        curl_setopt($curl, CURLOPT_TIMEOUT, 6);
+        $response = curl_exec($curl);
+        $httpCode = (int)curl_getinfo($curl, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($curl);
+        curl_close($curl);
+
+        $result = is_string($response) ? json_decode($response, true) : null;
+
+        if($httpCode !== 200 || !isset($result['receiverDueAmount']) || !is_numeric($result['receiverDueAmount'])) {
+            $this->logger(sprintf('getPrice failed [%d] %s %s', $httpCode, $curlError, $result['message'] ?? ''));
+            return null;
+        }
+
+        return round((float)$result['receiverDueAmount'], 2);
+    }
+
     private function saveCartDeliveryInfo($cartId, $data) {
         $this->ensureCartTableExists();
         $pref = _DB_PREFIX_;
