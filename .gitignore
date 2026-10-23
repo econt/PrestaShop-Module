@@ -1,9 +1,13 @@
-*
+# Only the listed paths are in the repo. Git does not look into an ignored directory,
+# so a directory is let in first and then what is in it.
+/*
 !/.gitignore
 !/README.md
-!/codecompletion/**
-!/modules/econtdelivery/**
-!/modules/econtdelivery/controllers/front/**
-!/modules/econtdeliverypayment/**
+!/codecompletion/
 !/econt_delivery_zip_generator.php
 !/EcontDelivery-PrestaShop-Module.zip
+!/modules/
+/modules/*
+!/modules/econtdelivery/
+!/modules/econtdeliverypayment/
+.DS_Store
