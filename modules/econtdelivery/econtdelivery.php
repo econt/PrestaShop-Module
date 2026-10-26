@@ -5,6 +5,9 @@ if (!defined('_PS_VERSION_')) {
 }
 
 class EcontDelivery extends Module {
+    /** @var array carts whose prices were asked from Econt without the cache in this request */
+    private static $freshPriceCarts = [];
+
 
     private $endpoints = array(
         'prod' => array(
@@ -442,6 +445,24 @@ class EcontDelivery extends Module {
         if($cartData) {
             $econtDeliveryInfo = json_decode($cartData, true);
             if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && !empty($econtDeliveryInfo['econt_server_prices'])) {
+                // The prices follow the cart (a changed cart is asked from Econt again, otherwise they come from the
+                // cache). When a payment module creates the order they are asked without the cache, once per request:
+                // the Econt form keeps its customer info id when the customer changes the address in it.
+                $controller = $this->context->controller;
+                $creatingOrder = $controller instanceof ModuleFrontController && isset($controller->module) && $controller->module instanceof PaymentModule;
+                $fresh = $creatingOrder && empty(self::$freshPriceCarts[(int)$cart->id]);
+                $checked = $this->withServerPrices($econtDeliveryInfo, $cart->id, $fresh);
+                if($fresh) self::$freshPriceCarts[(int)$cart->id] = true;
+
+                if(!$checked) {
+                    if($creatingOrder) return false;
+                } else {
+                    if($checked['shipping_price'] != $econtDeliveryInfo['shipping_price'] || $checked['shipping_price_cod'] != ($econtDeliveryInfo['shipping_price_cod'] ?? null)) {
+                        $this->saveCartDeliveryInfo($cart->id, json_encode($checked));
+                    }
+                    $econtDeliveryInfo = $checked;
+                }
+
                 $price = $econtDeliveryInfo['shipping_price'];
                 // Check for cash on delivery
                 $controllerClass = get_class($this->context->controller);
@@ -617,9 +638,10 @@ class EcontDelivery extends Module {
             $cartId = (int)$this->context->cookie->id_cart;
             $econtDeliveryInfo = json_decode($_REQUEST['econt_data'], true);
             if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && $cartId) {
-                // The prices from the browser are replaced with prices from the Econt server.
+                // The prices from the browser are replaced with prices from the Econt server, without the cache: the
+                // Econt form keeps its customer info id when the customer changes the address in it.
                 // Data that cannot be checked is not saved and does not replace data checked earlier.
-                $econtDeliveryInfo = $this->withServerPrices($econtDeliveryInfo, $cartId);
+                $econtDeliveryInfo = $this->withServerPrices($econtDeliveryInfo, $cartId, true);
                 if($econtDeliveryInfo) $this->saveCartDeliveryInfo($cartId, json_encode($econtDeliveryInfo));
                 if(isset($_REQUEST['ajax'])) {
                     die(json_encode($econtDeliveryInfo ? ['success' => true, 'price' => $econtDeliveryInfo['shipping_price']] : ['success' => false]));
@@ -632,7 +654,7 @@ class EcontDelivery extends Module {
             $cartId = (int)$this->context->cookie->id_cart;
             $econtDeliveryInfo = json_decode($_REQUEST['econt_delivery_info'], true);
             if($econtDeliveryInfo && isset($econtDeliveryInfo['shipping_price']) && $cartId) {
-                $econtDeliveryInfo = $this->withServerPrices($econtDeliveryInfo, $cartId);
+                $econtDeliveryInfo = $this->withServerPrices($econtDeliveryInfo, $cartId, true);
                 if($econtDeliveryInfo) $this->saveCartDeliveryInfo($cartId, json_encode($econtDeliveryInfo));
             }
         }
@@ -944,11 +966,15 @@ class EcontDelivery extends Module {
      * the EcontPay price, so that one is kept only between the prices without and with cash on delivery
      * (Econt blocks the EcontPay amount with its own price anyway).
      *
+     * The Econt form keeps its customer info id when the customer changes the address in it, so the address from the
+     * form is in the cache key too, and $fresh asks Econt even if the prices are in the cache.
+     *
      * @param array $econtDeliveryInfo data from the Econt form
      * @param int $cartId the cart from the cookie: actionDispatcherBefore runs before the context has the cart
+     * @param bool $fresh ask Econt even if the prices are in the cache
      * @return array|null the data with the server prices, or null if the prices cannot be checked
      */
-    private function withServerPrices($econtDeliveryInfo, $cartId) {
+    private function withServerPrices($econtDeliveryInfo, $cartId, $fresh = false) {
         if(!is_array($econtDeliveryInfo) || !is_scalar($econtDeliveryInfo['id'] ?? null) || trim((string)$econtDeliveryInfo['id']) === '') return null;
 
         $cart = new Cart((int)$cartId);
@@ -970,9 +996,13 @@ class EcontDelivery extends Module {
         $currency = $cartCurrency->iso_code;
 
         // One request to Econt per address and cart, not on every step of the checkout
-        $cacheKey = md5(implode('|', [$customerInfoId, $orderTotal, $orderWeight, $currency]));
+        $address = [];
+        foreach(['country_code', 'city_name', 'post_code', 'office_code', 'address', 'zip'] as $field) {
+            $address[] = is_scalar($econtDeliveryInfo[$field] ?? null) ? (string)$econtDeliveryInfo[$field] : '';
+        }
+        $cacheKey = md5(implode('|', [$customerInfoId, implode('|', $address), $orderTotal, $orderWeight, $currency]));
         $cached = json_decode((string)$this->context->cookie->econt_delivery_server_prices, true);
-        $prices = (is_array($cached) && ($cached['key'] ?? '') === $cacheKey) ? $cached['prices'] : null;
+        $prices = (!$fresh && is_array($cached) && ($cached['key'] ?? '') === $cacheKey) ? $cached['prices'] : null;
 
         if(!$prices) {
             $price = $this->getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, false);
