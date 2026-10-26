@@ -91,9 +91,6 @@ class EcontDeliveryPayment extends PaymentModule {
 
         if (!$this->active || $cart->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return null;
 
-        $currency = new Currency($cart->id_currency);
-        if ($currency->iso_code != 'BGN') return null;
-
         $paymentOption = new PaymentOption();
 
         $paymentOption->setCallToActionText($this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_TITLE')));
@@ -117,9 +114,6 @@ class EcontDeliveryPayment extends PaymentModule {
         if (intval($order->id) <= 0 || $order->module !== 'econtdeliverypayment') return null;
 
         if (!$this->active || $order->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return $this->orderConfirmationMessage('Улугата не е активна');
-
-        $currency = new Currency($order->id_currency);
-        if ($currency->iso_code != 'BGN') return $this->orderConfirmationMessage('Невалидна валута');
 
         $customer = new Customer($order->id_customer);
         if (!Validate::isLoadedObject($customer)) return $this->orderConfirmationMessage('Невалиден купувач');

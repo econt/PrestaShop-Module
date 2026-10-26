@@ -16,7 +16,6 @@ class EcontDeliveryPaymentValidationModuleFrontController extends ModuleFrontCon
         if (!$module->active || $cart->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) $this->redirectWithMessage('Улугата не е активна');
 
         $currency = new Currency($cart->id_currency);
-        if ($currency->iso_code != 'BGN') $this->redirectWithMessage('Невалидна валута');
 
         $customer = new Customer($cart->id_customer);
         if (!Validate::isLoadedObject($customer)) $this->redirectWithMessage('Невалиден купувач');
