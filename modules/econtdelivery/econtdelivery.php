@@ -570,7 +570,6 @@ class EcontDelivery extends Module {
             curl_setopt($curl, CURLOPT_POST, true);
             curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($order));
             curl_setopt($curl, CURLOPT_TIMEOUT, 6);
-            curl_exec($curl);
             $response = json_decode(curl_exec($curl), true);
 
             curl_close($curl);
