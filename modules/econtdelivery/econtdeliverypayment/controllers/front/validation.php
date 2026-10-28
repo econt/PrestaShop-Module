@@ -16,7 +16,6 @@ class EcontDeliveryPaymentValidationModuleFrontController extends ModuleFrontCon
         if (!$module->active || $cart->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) $this->redirectWithMessage('Улугата не е активна');
 
         $currency = new Currency($cart->id_currency);
-        if ($currency->iso_code != 'BGN') $this->redirectWithMessage('Невалидна валута');
 
         $customer = new Customer($cart->id_customer);
         if (!Validate::isLoadedObject($customer)) $this->redirectWithMessage('Невалиден купувач');
@@ -33,8 +32,8 @@ class EcontDeliveryPaymentValidationModuleFrontController extends ModuleFrontCon
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/PaymentsService.createPayment.json");
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($curl, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json',
             "Authorization: {$deliverySecret}"

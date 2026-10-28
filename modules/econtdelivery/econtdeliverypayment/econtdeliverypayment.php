@@ -16,7 +16,7 @@ class EcontDeliveryPayment extends PaymentModule {
     public function __construct() {
         $this->name = 'econtdeliverypayment';
         $this->tab = 'payments_gateways';
-        $this->version = '2.0.3'; // change from zip generator
+        $this->version = '2.0.4'; // change from zip generator
         $this->ps_versions_compliancy = array(
             'min' => '1.7',
             'max' => _PS_VERSION_
@@ -58,8 +58,8 @@ class EcontDeliveryPayment extends PaymentModule {
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/PluginsService.logEvent.json");
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($curl, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json',
             "Authorization: {$deliverySecret}"
@@ -91,9 +91,6 @@ class EcontDeliveryPayment extends PaymentModule {
 
         if (!$this->active || $cart->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return null;
 
-        $currency = new Currency($cart->id_currency);
-        if ($currency->iso_code != 'BGN') return null;
-
         $paymentOption = new PaymentOption();
 
         $paymentOption->setCallToActionText($this->l(Configuration::get('ECONT_DELIVERY_PAYMENT_TITLE')));
@@ -118,9 +115,6 @@ class EcontDeliveryPayment extends PaymentModule {
 
         if (!$this->active || $order->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return $this->orderConfirmationMessage('Улугата не е активна');
 
-        $currency = new Currency($order->id_currency);
-        if ($currency->iso_code != 'BGN') return $this->orderConfirmationMessage('Невалидна валута');
-
         $customer = new Customer($order->id_customer);
         if (!Validate::isLoadedObject($customer)) return $this->orderConfirmationMessage('Невалиден купувач');
 
@@ -137,8 +131,8 @@ class EcontDeliveryPayment extends PaymentModule {
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/PaymentsService.confirmPayment.json");
         curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
         curl_setopt($curl, CURLOPT_HTTPHEADER, [
             'Content-Type: application/json',
             "Authorization: {$deliverySecret}"
