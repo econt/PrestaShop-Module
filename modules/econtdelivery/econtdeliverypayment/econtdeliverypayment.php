@@ -8,6 +8,9 @@ if (!defined('_PS_VERSION_')) {
 
 class EcontDeliveryPayment extends PaymentModule {
 
+    // Колко дълго важи подписаният адрес за връщане от плащането (econtdeliverypayment_time), в секунди
+    const RETURN_URL_TTL = 86400;
+
     private $hooks = array(
         'paymentOptions',
         'orderConfirmation'
@@ -122,11 +125,16 @@ class EcontDeliveryPayment extends PaymentModule {
         $deliverySecret = Configuration::get('ECONT_DELIVERY_SECRET');
         if(!$deliveryBaseURL || !$deliverySecret) return $this->orderConfirmationMessage('Невалидна конфигурация');
 
-        if (@$_GET['econtdeliverypayment_hash'] !== EcontDelivery::getProtectionHash(array(
+        if (!hash_equals(EcontDelivery::getProtectionHash(array(
                 'id_order' => (string)@$order->id,
                 'econtdeliverypayment_transaction_id' => (string)@$_GET['econtdeliverypayment_transaction_id'],
                 'econtdeliverypayment_time' => (string)@$_GET['econtdeliverypayment_time']
-            ))) return $this->orderConfirmationMessage('Невалидна трансакция');
+            )), (string)@$_GET['econtdeliverypayment_hash'])) return $this->orderConfirmationMessage('Невалидна трансакция');
+
+        // Подписаният адрес важи RETURN_URL_TTL секунди и само докато поръчката чака плащането
+        $returnTime = (int)@$_GET['econtdeliverypayment_time'];
+        if ($returnTime > time() + 300 || time() - $returnTime > self::RETURN_URL_TTL) return $this->orderConfirmationMessage('Връзката за потвърждение на плащането е изтекла');
+        if (!EcontDelivery::updateOrderStatus($order, $this->context->language->id)) return null;
 
         $curl = curl_init();
         curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/PaymentsService.confirmPayment.json");
