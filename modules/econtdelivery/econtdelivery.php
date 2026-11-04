@@ -423,6 +423,7 @@ class EcontDelivery extends Module {
     }
 
     public function getOrderShippingCost($cart, $shipping_cost) {
+        // Only the order of this cart (by id_cart), also in the admin; an order id from the request is not used
         $order = null;
         if($cart->id) {
             $id_order = (int)Db::getInstance()->getValue('SELECT id_order FROM '._DB_PREFIX_.'orders WHERE id_cart = '.(int)$cart->id);
@@ -430,8 +431,6 @@ class EcontDelivery extends Module {
                 $order = new Order($id_order);
             }
         }
-        if(!$order && !empty($_REQUEST['id_order'])) $order = new Order($_REQUEST['id_order']);
-
         // Check if we have an existing order with delivery info
         if($orderID = @intval($order->id)) {
             $pref = _DB_PREFIX_;
