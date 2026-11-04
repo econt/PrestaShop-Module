@@ -73,7 +73,7 @@ class EcontDeliveryPaymentValidationModuleFrontController extends ModuleFrontCon
             'id_order' => $module->currentOrder,
             'key' => $customer->secure_key,
             'econtdeliverypayment_transaction_id' => $response['paymentIdentifier'],
-            'econtdeliverypayment_time' => time(),
+            'econtdeliverypayment_time' => $currentTimestamp,
             'econtdeliverypayment_hash' => EcontDelivery::getProtectionHash(array(
                 'id_order' => (string)$order->id,
                 'econtdeliverypayment_transaction_id' => (string)$response['paymentIdentifier'],

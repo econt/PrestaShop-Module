@@ -72,6 +72,12 @@ class EcontDelivery extends Module {
 
         return @rmdir($dirName);
     }
+    // Произходът (scheme://host[:port]) на адреса на Еконт, с който се сравнява произходът на съобщенията от формата
+    public static function getDeliveryOrigin($deliveryBaseURL) {
+        $url = parse_url((string)$deliveryBaseURL);
+        if (empty($url['scheme']) || empty($url['host'])) return '';
+        return strtolower($url['scheme']) . '://' . strtolower($url['host']) . (isset($url['port']) ? ':' . $url['port'] : '');
+    }
     public static function getProtectionHash($params) {
         return hash_hmac('sha1', serialize($params), Configuration::get('ECONT_DELIVERY_SECRET'));
     }
@@ -223,7 +229,9 @@ class EcontDelivery extends Module {
 
         if (Tools::isSubmit('submitEcontDeliverySettings')) {
             $newEndpointURL = $this->endpoints[Tools::getValue('ECONT_DELIVERY_ENDPOINT')]['URL'];
+            // Празно поле: остава сегашният код (ключът не се връща в страницата)
             $newSecret = Tools::getValue('ECONT_DELIVERY_SECRET');
+            if ($newSecret === '') $newSecret = Configuration::get('ECONT_DELIVERY_SECRET');
 
             $curl = curl_init();
             curl_setopt($curl, CURLOPT_URL, "{$newEndpointURL}/services/PluginsService.logEvent.json");
@@ -285,12 +293,10 @@ class EcontDelivery extends Module {
             $endPointName = $endpoint['name'];
         }
 
-        $secret = Configuration::get('ECONT_DELIVERY_SECRET');
         $helper->tpl_vars = array(
             'fields_value' => array(
                 'ECONT_DELIVERY_ENDPOINT' => $endPointName,
-                'ECONT_DELIVERY_SECRET' => $secret,
-                'ECONT_DELIVERY_SECRET_HIDDEN' => $secret,
+                'ECONT_DELIVERY_SECRET' => '',
                 'ECONT_DELIVERY_PAYMENT' => ((intval(Module::getModuleIdByName($this->econtDeliveryPaymentModule['name'])) <= 0 || !Module::isEnabled($this->econtDeliveryPaymentModule['name'])) ? 0 : 1),
 
                 // payment
@@ -316,8 +322,6 @@ class EcontDelivery extends Module {
         </style>
         <script>
             document.addEventListener('DOMContentLoaded', function() {
-                $('#ECONT_DELIVERY_SECRET').val($('#ECONT_DELIVERY_SECRET_HIDDEN').val());
-
                 let logoImageBaseURL = '<?=$this->getPathUri() . '/view/img'?>';
                 function iconFieldChange() {
                     if (!icon) {
@@ -364,11 +368,8 @@ class EcontDelivery extends Module {
                             'name' => 'ECONT_DELIVERY_SECRET',
                             'label' => $this->l("Код за свързване"),
                             'maxlength' => 100,
-                            'style' => 'width: 170px'
-                        ),
-                        array(
-                            'type' => 'hidden',
-                            'name' => 'ECONT_DELIVERY_SECRET_HIDDEN'
+                            'style' => 'width: 170px',
+                            'desc' => Configuration::get('ECONT_DELIVERY_SECRET') ? $this->l('Кодът е въведен. Оставете полето празно, за да остане същият.') : ''
                         ),
 
                         // payment
@@ -659,12 +660,31 @@ class EcontDelivery extends Module {
         }
         
         if(isset($_REQUEST['controller']) && $_REQUEST['controller'] == 'AdminOrders' && isset($_REQUEST['submitAddressShipping']) && !empty($_REQUEST['id_order']) && !empty($_REQUEST['econt_delivery_customer_info'])) {
-            Db::getInstance()->insert('econt_delivery_order_info',array(
-                'id_order' => $_REQUEST['id_order'],
-                'info' => Db::getInstance()->escape($_REQUEST['econt_delivery_customer_info']),
-            ),false,false,Db::REPLACE);
-            $this->syncOrder($_REQUEST['id_order']);
+            $this->saveAdminOrderDeliveryInfo();
         }
+    }
+
+    // Нови данни от формата на Еконт за поръчка от админа (смяна на адреса). Hook-ът се вика и в магазина, и преди
+    // контролера, затова тук се проверяват служителят, правото и token-ът на AdminOrders. Цените се взимат от Еконт.
+    private function saveAdminOrderDeliveryInfo() {
+        $employee = $this->context->employee;
+        if (
+                !defined('_PS_ADMIN_DIR_')
+            ||  !Validate::isLoadedObject($employee) || !$employee->isLoggedBack() || !$employee->can('edit', 'AdminOrders')
+            ||  !hash_equals((string)Tools::getAdminTokenLite('AdminOrders'), (string)Tools::getValue('token'))
+        ) return;
+
+        $order = new Order((int)$_REQUEST['id_order']);
+        if (!Validate::isLoadedObject($order) || $order->id_carrier != Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return;
+
+        $econtDeliveryInfo = $this->withServerPrices(json_decode((string)$_REQUEST['econt_delivery_customer_info'], true), $order->id_cart, true);
+        if (!$econtDeliveryInfo) return;
+
+        Db::getInstance()->insert('econt_delivery_order_info',array(
+            'id_order' => (int)$order->id,
+            'info' => Db::getInstance()->escape(json_encode($econtDeliveryInfo)),
+        ),false,false,Db::REPLACE);
+        $this->syncOrder($order->id);
     }
 
     public function hookDisplayCarrierExtraContent() {
@@ -738,7 +758,7 @@ class EcontDelivery extends Module {
                 });
                 $(window).unbind('message.econtShipping');
                 $(window).bind('message.econtShipping', function(e){
-                    if(e.originalEvent.origin.indexOf('<?=$deliveryBaseURL?>') == 0) {
+                    if(e.originalEvent.origin === <?=json_encode(self::getDeliveryOrigin($deliveryBaseURL))?>) {
                         if(e.originalEvent.data['shipment_error']) {
                             alert(e.originalEvent.data['shipment_error'])
                         } else {
@@ -856,7 +876,17 @@ class EcontDelivery extends Module {
             'default_css' => 1
         );
 
-        $prepareLoadingFrameURL = $deliveryBaseURL. '/create_label.php?' . http_build_query(array('order_number' => $order->id, 'token' => $deliverySecret));
+        // Формата за товарителница се отваря със сесия за поръчката от Еконт, ключът не стига до браузъра (ITDEV-1191)
+        $prepareLoadingFrameURL = '';
+        $prepareLoadingError = '';
+        if (empty($order->shipping_number)) {
+            $labelSession = $this->createLabelSession($deliveryBaseURL, $deliverySecret, $order->id);
+            if (!empty($labelSession['token'])) {
+                $prepareLoadingFrameURL = $deliveryBaseURL . '/create_label.php?' . http_build_query(array('order_number' => $order->id, 'token' => $labelSession['token']));
+            } else {
+                $prepareLoadingError = $labelSession['error'];
+            }
+        }
         $customerInfoFrameURL = $deliveryBaseURL.'/customer_info.php?' . http_build_query($customerInfoParams, null, '&');
 
         ob_start();?>
@@ -868,11 +898,13 @@ class EcontDelivery extends Module {
                         ||  this.href.indexOf('generate-delivery-slip-pdf') > 0
                     ) {
                         let num = $('.shipping_number_show').text().trim();
-                        if (!num) num = '<?=$order->shipping_number?>';
+                        if (!num) num = <?=json_encode((string)$order->shipping_number)?>;
                         if (num) {
                             window.open(<?=json_encode($response['pdfURL']);?>);
+                        } else if (<?=json_encode($prepareLoadingFrameURL)?>) {
+                            $('<a>Generate Label</a>').attr('href', <?=json_encode($prepareLoadingFrameURL)?>).appendTo(document.body).fancybox({width:700,height:'100%',type:'iframe',title:''}).trigger('click').remove()
                         } else {
-                            $('<a href="<?=$prepareLoadingFrameURL?>">Generate Label</a>').appendTo(document.body).fancybox({width:700,height:'100%',type:'iframe',title:''}).trigger('click').remove()
+                            alert(<?=json_encode($prepareLoadingError)?>);
                         }
                         e.preventDefault();
                     }
@@ -895,14 +927,14 @@ class EcontDelivery extends Module {
 
                 $(window).unbind('message.econtShipping');
                 $(window).bind('message.econtShipping', function(e){
-                    if(e.originalEvent.origin.indexOf('<?php echo $deliveryBaseURL?>') == 0) {
+                    if(e.originalEvent.origin === <?=json_encode(self::getDeliveryOrigin($deliveryBaseURL))?>) {
                         let messageData = e['originalEvent']['data'];
                         if (!messageData) return;
 
                         if (messageData['event'] == 'cancel') {
                             $('.fancybox-close').trigger('click');
                         } else if(messageData['event'] == 'confirm') {
-                            if (messageData['printPdf'] === true && messageData['shipmentStatus']['pdfURL']) window.open(messageData['shipmentStatus']['pdfURL'], '_blank');
+                            if (messageData['printPdf'] === true && /^https:\/\//i.test(messageData['shipmentStatus']['pdfURL'] || '')) window.open(messageData['shipmentStatus']['pdfURL'], '_blank');
                             $('.fancybox-close').trigger('click');
                             window.location.href = window.location.href;
                         } else if(!messageData['event']) {
@@ -922,6 +954,32 @@ class EcontDelivery extends Module {
         <?php
         return ob_get_clean();
     }
+    // Сесия за товарителница за поръчката (OrdersService.createLabelSession), която create_label.php приема в token вместо ключа
+    private function createLabelSession($deliveryBaseURL, $deliverySecret, $orderId) {
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, "{$deliveryBaseURL}/services/OrdersService.createLabelSession.json");
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($curl, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            "Authorization: {$deliverySecret}"
+        ]);
+        curl_setopt($curl, CURLOPT_POST, true);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode(array(
+            'orderNumber' => (string)$orderId
+        )));
+        curl_setopt($curl, CURLOPT_TIMEOUT, 6);
+
+        $response = json_decode(curl_exec($curl), true);
+        $curlError = curl_error($curl);
+        curl_close($curl);
+
+        if (is_string($response) && $response !== '') return array('token' => $response);
+
+        return array('error' => !empty($response['message']) ? $response['message'] : ($curlError ?: 'Unknown error'));
+    }
+
     public function hookActionAdminGenerateDeliverySlipPDFBefore() {
         $orderID = intval($_REQUEST['id_order']);
         if(!empty($_REQUEST['id_order']) && !$orderID) return;
