@@ -52,16 +52,21 @@ class EcontDelivery extends Module {
         foreach ($_COOKIE as $cookieName => $cookieValue) $cookies[] = "{$cookieName}={$cookieValue}";
         return implode('; ', $cookies);
     }
+    /**
+     * @return bool false if a file could not be copied
+     */
     private function recursiveCopyDir($sourceDir, $destinationDir) {
+        $copied = true;
         $dir = opendir($sourceDir);
         @mkdir($destinationDir);
         while (($file = readdir($dir))) {
             if (( $file != '.' ) && ( $file != '..' )) {
-                if ( is_dir($sourceDir . DIRECTORY_SEPARATOR . $file) ) $this->recursiveCopyDir($sourceDir . DIRECTORY_SEPARATOR . $file, $destinationDir . DIRECTORY_SEPARATOR . $file);
-                else @copy($sourceDir . DIRECTORY_SEPARATOR . $file, $destinationDir . DIRECTORY_SEPARATOR . $file);
+                if ( is_dir($sourceDir . DIRECTORY_SEPARATOR . $file) ) $copied = $this->recursiveCopyDir($sourceDir . DIRECTORY_SEPARATOR . $file, $destinationDir . DIRECTORY_SEPARATOR . $file) && $copied;
+                else $copied = @copy($sourceDir . DIRECTORY_SEPARATOR . $file, $destinationDir . DIRECTORY_SEPARATOR . $file) && $copied;
             }
         }
         closedir($dir);
+        return $copied;
     }
     private function recursiveRemoveDir($dirName) {
         if (!is_dir($dirName)) return false;
@@ -399,8 +404,17 @@ class EcontDelivery extends Module {
         )) . $outputOther;
     }
 
+    /**
+     * EcontPay is installed from a copy of econtdeliverypayment/ in modules/econtdeliverypayment.
+     * The copy is made on install, on settings save with EcontPay on and on upgrade (upgrade/upgrade-2.0.4.php).
+     *
+     * @return bool false if a file could not be copied
+     */
+    public function copyPaymentModuleFiles() {
+        return $this->recursiveCopyDir(__DIR__ . DIRECTORY_SEPARATOR . $this->econtDeliveryPaymentModule['name'], dirname(__DIR__) . DIRECTORY_SEPARATOR . $this->econtDeliveryPaymentModule['name']);
+    }
     private function enablePaymentModule() {
-        $this->recursiveCopyDir(__DIR__ . DIRECTORY_SEPARATOR . $this->econtDeliveryPaymentModule['name'], dirname(__DIR__) . DIRECTORY_SEPARATOR . $this->econtDeliveryPaymentModule['name']);
+        $this->copyPaymentModuleFiles();
         if (!in_array($this->econtDeliveryPaymentModule['name'], Module::getModulesDirOnDisk())) throw new Exception($this->l('Модулът "EcontPay" не е намерен'));
 
         if (intval(Module::getModuleIdByName($this->econtDeliveryPaymentModule['name'])) <= 0) {
