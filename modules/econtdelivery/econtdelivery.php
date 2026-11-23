@@ -41,7 +41,9 @@ class EcontDelivery extends Module {
         'actionOrderStatusPostUpdate',
         'displayAdminOrderTabShip',
         'displayAdminOrderMain',
-        'actionValidateStepComplete'
+        'actionValidateStepComplete',
+        'actionPresentPaymentOptions',
+        'displayPaymentTop'
     );
 
     private function getAdminBaseURL() {
@@ -101,7 +103,7 @@ class EcontDelivery extends Module {
     public function __construct() {
         $this->name = 'econtdelivery';
         $this->tab = 'shipping_logistics';
-        $this->version = '2.0.4'; // change from zip generator
+        $this->version = '2.0.5'; // change from zip generator
         $this->author = 'ITPartner';
         $this->need_instance = 0;
         $this->ps_versions_compliancy = array(
@@ -451,7 +453,8 @@ class EcontDelivery extends Module {
             $row = Db::getInstance()->getRow("SELECT * FROM {$pref}econt_delivery_order_info WHERE id_order = $orderID");
             $econtDeliveryInfo = json_decode($row['info'],true);
             $price = ($order->module == 'ps_cashondelivery' ? $econtDeliveryInfo['shipping_price_cod'] : $econtDeliveryInfo['shipping_price']);
-            return (float)$price;
+            // Without a price with cash on delivery (Econt does not allow it for the order) the price without it
+            return (float)($price ?? $econtDeliveryInfo['shipping_price']);
         }
         
         // Check DATABASE for cart delivery info (only data with prices from the Econt server)
@@ -471,11 +474,19 @@ class EcontDelivery extends Module {
                 if(!$checked) {
                     if($creatingOrder) return false;
                 } else {
-                    if($checked['shipping_price'] != $econtDeliveryInfo['shipping_price'] || $checked['shipping_price_cod'] != ($econtDeliveryInfo['shipping_price_cod'] ?? null)) {
+                    if(
+                            $checked['shipping_price'] != $econtDeliveryInfo['shipping_price']
+                        ||  $checked['shipping_price_cod'] != ($econtDeliveryInfo['shipping_price_cod'] ?? null)
+                        ||  ($checked['shipment_error_cod'] ?? '') !== ($econtDeliveryInfo['shipment_error_cod'] ?? '')
+                    ) {
                         $this->saveCartDeliveryInfo($cart->id, json_encode($checked));
                     }
                     $econtDeliveryInfo = $checked;
                 }
+
+                // Econt does not allow cash on delivery for this order (e.g. above the legal limit for cash payments):
+                // Econt is not available when cash on delivery or EcontPay creates the order, so no such order is made
+                if($creatingOrder && $this->getCodError($econtDeliveryInfo, $controller->module->name) !== '') return false;
 
                 $price = $econtDeliveryInfo['shipping_price'];
                 // Check for cash on delivery
@@ -723,12 +734,16 @@ class EcontDelivery extends Module {
             'customer_city_name' => $address->city,
             'customer_post_code' => $address->postcode,
             'customer_address' => $address->address1.' '.$address->address2,
-            'ignore_history' => 1
+            'ignore_history' => 1,
+            // When only cash on delivery is not possible (e.g. above the legal limit for cash payments), the Econt form
+            // gives the price without it and the reason in shipment_error_cod, instead of an error for the whole form
+            'separate_cod_error' => 1
         );
 
         $deliveryBaseURL = Configuration::get('ECONT_DELIVERY_ENDPOINT');
         $frameURL = $deliveryBaseURL.'/customer_info.php?'.http_build_query($frameParams,null,'&');
         $deliveryMethodPriceCD = $this->l('наложен платеж');
+        $codNotPossibleTxt = $this->l('наложеният платеж не е възможен');
 
         ob_start();?>
         <iframe id="econt_delivery_customer_info_frame" style="width:100%;height:800px;border:none;margin-top: 15px;" src="<?=$frameURL?>"></iframe>
@@ -779,7 +794,10 @@ class EcontDelivery extends Module {
                             $frame.parent().hide();
                             $confirmBtn.attr({disabled:false});
                             let labelTxt = shippingInfo['shipping_price'] + shippingInfo['shipping_price_currency_sign'];
-                            if(
+                            // Econt does not allow cash on delivery (e.g. above the legal limit for cash payments)
+                            if(shippingInfo['shipment_error_cod']) {
+                                labelTxt += ' (' + <?php echo json_encode($codNotPossibleTxt)?> + ')'
+                            } else if(
                                     (shippingInfo['shipping_price'] != shippingInfo['shipping_price_cod'])
                                 ||  (shippingInfo['shipping_price'] != shippingInfo['shipping_price_cod_e'])
                             ) {
@@ -1029,6 +1047,68 @@ class EcontDelivery extends Module {
     }
     
     /**
+     * Why Econt does not allow cash on delivery (and EcontPay, which Econt sends with cash on delivery too) for the data
+     * of the cart after withServerPrices()
+     *
+     * @param array|null $econtDeliveryInfo
+     * @param string|null $paymentModule name of the payment module; null for any of them
+     * @return string message for the customer, empty if cash on delivery is possible
+     */
+    private function getCodError($econtDeliveryInfo, $paymentModule = null) {
+        if($paymentModule !== null && !in_array($paymentModule, ['ps_cashondelivery', $this->econtDeliveryPaymentModule['name']], true)) return '';
+        if(!is_array($econtDeliveryInfo) || empty($econtDeliveryInfo['econt_server_prices'])) return '';
+        if(!array_key_exists('shipping_price_cod', $econtDeliveryInfo) || $econtDeliveryInfo['shipping_price_cod'] !== null) return '';
+
+        $reason = is_string($econtDeliveryInfo['shipment_error_cod'] ?? null) ? trim($econtDeliveryInfo['shipment_error_cod']) : '';
+        if($reason === '') $reason = $this->l('Еконт не изчисли цена с наложен платеж.');
+
+        return sprintf($this->l('Наложен платеж и EcontPay не са възможни за тази поръчка: %s Моля, изберете друг начин на плащане.'), $reason);
+    }
+
+    /**
+     * The data of the cart with Econt as carrier, with the prices from the Econt server (from the cache if the cart
+     * did not change), or null
+     *
+     * @return array|null
+     */
+    private function getCheckedCartDeliveryInfo() {
+        $cart = $this->context->cart;
+        if(!Validate::isLoadedObject($cart) || (int)$cart->id_carrier !== (int)Configuration::get('ECONT_DELIVERY_CARRIER_ID')) return null;
+
+        $cartData = $this->getCartDeliveryInfo((int)$cart->id);
+        $econtDeliveryInfo = $cartData ? json_decode($cartData, true) : null;
+        if(empty($econtDeliveryInfo['econt_server_prices'])) return null;
+
+        $checked = $this->withServerPrices($econtDeliveryInfo, (int)$cart->id);
+        if($checked && ($checked['shipment_error_cod'] ?? '') !== ($econtDeliveryInfo['shipment_error_cod'] ?? '')) {
+            $this->saveCartDeliveryInfo((int)$cart->id, json_encode($checked));
+        }
+
+        return $checked ?: $econtDeliveryInfo;
+    }
+
+    /**
+     * Cash on delivery and EcontPay are not offered when Econt does not allow cash on delivery for the order
+     * (e.g. above the legal limit for cash payments). PrestaShop 1.7.7+.
+     */
+    public function hookActionPresentPaymentOptions($params) {
+        if(!isset($params['paymentOptions']) || !is_array($params['paymentOptions'])) return;
+        if($this->getCodError($this->getCheckedCartDeliveryInfo()) === '') return;
+
+        unset($params['paymentOptions']['ps_cashondelivery'], $params['paymentOptions'][$this->econtDeliveryPaymentModule['name']]);
+    }
+
+    /**
+     * Above the payment methods: why cash on delivery and EcontPay are not offered
+     */
+    public function hookDisplayPaymentTop($params) {
+        $codError = $this->getCodError($this->getCheckedCartDeliveryInfo());
+        if($codError === '') return '';
+
+        return '<div class="alert alert-warning econt-cod-error" role="alert">' . htmlspecialchars($codError, ENT_QUOTES, 'UTF-8') . '</div>';
+    }
+
+    /**
      * Puts the shipping prices from the Econt server in the data from the Econt form.
      *
      * The prices in the form data come from the browser, so they are not trusted. The server asks
@@ -1038,6 +1118,10 @@ class EcontDelivery extends Module {
      *
      * The Econt form keeps its customer info id when the customer changes the address in it, so the address from the
      * form is in the cache key too, and $fresh asks Econt even if the prices are in the cache.
+     *
+     * When Econt does not allow cash on delivery (e.g. above the legal limit for cash payments), the price without it
+     * is kept, shipping_price_cod and shipping_price_cod_e are null and shipment_error_cod has the reason from Econt:
+     * the order is possible only with a payment method without cash on delivery (see getCodError()).
      *
      * @param array $econtDeliveryInfo data from the Econt form
      * @param int $cartId the cart from the cookie: actionDispatcherBefore runs before the context has the cart
@@ -1079,20 +1163,32 @@ class EcontDelivery extends Module {
             if($price === null) return null;
 
             // Like the Econt form: an order without a total has no cash on delivery
-            $priceCod = $orderTotal > 0 ? $this->getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, true) : $price;
-            if($priceCod === null) return null;
+            $codError = '';
+            $priceCod = $orderTotal > 0 ? $this->getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, true, $codError) : $price;
 
+            // The reason is not kept in the cookie (its size is limited), only in the data of the cart
             $prices = ['shipping_price' => $price, 'shipping_price_cod' => $priceCod];
             $this->context->cookie->econt_delivery_server_prices = json_encode(['key' => $cacheKey, 'prices' => $prices]);
+            if($priceCod === null) $econtDeliveryInfo['shipment_error_cod'] = $codError;
         }
 
-        $minPrice = min($prices['shipping_price'], $prices['shipping_price_cod']);
-        $maxPrice = max($prices['shipping_price'], $prices['shipping_price_cod']);
-        $priceCodE = round((float)($econtDeliveryInfo['shipping_price_cod_e'] ?? $maxPrice), 2);
-
         $econtDeliveryInfo['shipping_price'] = $prices['shipping_price'];
-        $econtDeliveryInfo['shipping_price_cod'] = $prices['shipping_price_cod'];
-        $econtDeliveryInfo['shipping_price_cod_e'] = min(max($priceCodE, $minPrice), $maxPrice);
+
+        if($prices['shipping_price_cod'] === null) {
+            $econtDeliveryInfo['shipping_price_cod'] = null;
+            $econtDeliveryInfo['shipping_price_cod_e'] = null;
+            $reason = is_string($econtDeliveryInfo['shipment_error_cod'] ?? null) ? trim(strip_tags($econtDeliveryInfo['shipment_error_cod'])) : '';
+            $econtDeliveryInfo['shipment_error_cod'] = $reason !== '' ? $reason : $this->l('Еконт не изчисли цена с наложен платеж.');
+        } else {
+            unset($econtDeliveryInfo['shipment_error_cod']);
+
+            $minPrice = min($prices['shipping_price'], $prices['shipping_price_cod']);
+            $maxPrice = max($prices['shipping_price'], $prices['shipping_price_cod']);
+            $priceCodE = round((float)($econtDeliveryInfo['shipping_price_cod_e'] ?? $maxPrice), 2);
+
+            $econtDeliveryInfo['shipping_price_cod'] = $prices['shipping_price_cod'];
+            $econtDeliveryInfo['shipping_price_cod_e'] = min(max($priceCodE, $minPrice), $maxPrice);
+        }
         // getOrderShippingCost() and the delivery step take only data with this mark (not data saved before 2.0.4)
         $econtDeliveryInfo['econt_server_prices'] = 1;
 
@@ -1105,7 +1201,7 @@ class EcontDelivery extends Module {
      *
      * @return float|null null on a connection error or an error from Econt
      */
-    private function getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, $cod) {
+    private function getEcontPrice($customerInfoId, $orderTotal, $orderWeight, $currency, $cod, &$error = '') {
         if(!($deliveryBaseURL = Configuration::get('ECONT_DELIVERY_ENDPOINT'))) return null;
         if(!($deliverySecret = Configuration::get('ECONT_DELIVERY_SECRET'))) return null;
 
@@ -1142,6 +1238,7 @@ class EcontDelivery extends Module {
 
         if($httpCode !== 200 || !isset($result['receiverDueAmount']) || !is_numeric($result['receiverDueAmount'])) {
             $this->logger(sprintf('getPrice failed [%d] %s %s', $httpCode, $curlError, $result['message'] ?? ''));
+            $error = is_string($result['message'] ?? null) ? trim(strip_tags($result['message'])) : '';
             return null;
         }
 
